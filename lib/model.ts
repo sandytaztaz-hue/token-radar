@@ -1,25 +1,34 @@
-// The token radar's model, version radar-3: one snapshot of the protocol universe in, one ranked
-// board out. Radar-3 keeps radar-2's scoring formula byte for byte, and ships the derivation
-// with the board: the 128 token-bearing comparables the multiples come from, so the dashboard
-// re-derives every multiple in the browser and shows its work, and the count of above-floor
-// protocols the board sets aside because the snapshot carries no parent record to clear them.
-//
-// The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and every other
-// rankable pre-token protocol below the watchlist floor: the early rows the radar exists to find. A
-// protocol is pre-token when its index entry records no token (no market cap, no CoinGecko id, no
-// symbol); the snapshot's live-token protocols are kept apart and shown as the market's own values,
-// never mixed into the ranked board.
+// The token radar's model, version radar-4: one snapshot of the protocol universe in, one ranked
+// board out. Radar-4 replaces radar-2/3's category-median primary with a fitted size curve plus a
+// category correction, and covers every rankable pre-token protocol at any TVL (see buildBoard).
+// The fit is weak (R-squared about 0.19) and the dashboard says so; the validation block in
+// data.js carries the leave-one-out backtest so the weakness is measured, not hidden.
 //
 // Implied value follows only from the snapshot's own figures, never from a hand-written list of names.
-// The multiple is the market's own: the median market-cap-to-TVL ratio of the token-bearing protocols
-// in the same category (at least three of them), else the pooled median of the category's family, else
-// the global median over every token-bearing protocol:
+// The size curve is the least-squares fit of log market cap on log TVL over the 128 token-bearing
+// comparables (mcap_usd > 0, tvl_usd > 0); the category correction is the median log-residual of a
+// category's comparables against that curve, shrunk by n/(n+3) when the category has at least three
+// comparables, else the pooled median residual of its family (shrunk the same way), else zero:
 //
-//   multiple     = category median, else family pooled median, else global median
+//   curve value  = exp(intercept + slope x ln(tvl_usd) + categoryEffect)
 //   growthMult   = 1 + 0.5 x clamp(change_7d, -50, 100) / 100
 //   maturityMult = 0.6 + 0.4 x min(age_days, 1460) / 1460   (age_days unknown: 365)
-//   breadthMult  = 1 + 0.04 x min(max(chains - 1, 0), 5)
-//   implied      = max(1, round(tvl_usd x multiple x growthMult x maturityMult x breadthMult))
+//   breadthMult  = 1 + 0.04 x min(max(chains.length - 1, 0), 5)
+//   implied      = max(1, round(curve value x growthMult x maturityMult x breadthMult))
+//
+// NOTE on the formula: the curve predicts log(FDV) itself, so the curve value is exp(...) on its
+// own — multiplying by TVL again would double-count size (for Steakhouse, TVL x exp(...) is
+// about $2.5e17, while exp(...) alone is about $90M before multipliers). The task's draft wrote
+// "TVL * exp(a + b*ln(TVL) + effect)"; the implementation uses exp(...) alone, which is also the
+// formula whose leave-one-out numbers the validation block reproduces.
+//
+// Every row also carries an uncertainty band (the interquartile range of FDV/TVL ratios from the
+// row's multiple source — category, else family, else global — applied as a ratio to the implied
+// value: low = implied x p25/median, high = implied x p75/median) and a farm verdict netted at the
+// band's low: net_low_usd = round(implied_low_usd x FARMER_SHARE - plan_gas_usd), where
+// FARMER_SHARE is a STATED ASSUMPTION ("farmers share 5% of FDV at launch"), never a fact, and
+// breakeven_fdv_usd = round(plan_gas_usd / FARMER_SHARE). Capital is not a cost (recoverable);
+// only gas/fees parsed out of the farm plan's cost strings count toward plan_gas_usd.
 //
 // A protocol that has run longer with no token, is growing, and spans more chains earns a higher
 // implied value for the same TVL. The constants are stated in the dashboard and changeable in the
@@ -78,7 +87,14 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-3';
+export const MODEL_VERSION = 'radar-4';
+
+/**
+ * STATED ASSUMPTION, never a fact: the share of a launch's FDV that farmers collectively
+ * receive, used only for the farm verdict (net_low_usd and breakeven_fdv_usd). Labelled as an
+ * assumption everywhere it appears.
+ */
+export const FARMER_SHARE = 0.05;
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -106,9 +122,25 @@ export interface BoardRow {
   token_status: 'pre-token';
   age_days: number | null;
   implied_value_usd: number;
+  /** The uncertainty band: implied scaled by the p25/median and p75/median FDV/TVL ratios of the row's multiple source. Band low is floored at $1. */
+  implied_low_usd: number;
+  implied_high_usd: number;
+  /** Gas/fees parsed out of the farm plan's cost strings (capital excluded); cents. */
+  plan_gas_usd: number;
+  /** Farm verdict at the band's low: round(implied_low_usd x FARMER_SHARE - plan_gas_usd). FARMER_SHARE is a stated assumption, never a fact. May be negative. */
+  net_low_usd: number;
+  /** Launch FDV at which the farm breaks even: round(plan_gas_usd / FARMER_SHARE). */
+  breakeven_fdv_usd: number;
+  /** True when the row is a rankable pre-token protocol above the watchlist floor that is not on the watchlist: included in radar-4, with a verification step prepended to its farm plan. */
+  flagged_above_floor: boolean;
   model: {
     multiple: number;
     multiple_source: 'category' | 'family' | 'global';
+    /** The radar-4 curve value before multipliers: exp(intercept + slope x ln(tvl_usd) + categoryEffect). Full precision, so the dashboard recompute agrees with the board. */
+    curve_value_usd: number;
+    /** The shrunk median log-residual correction for the row's category (see buildFit). */
+    category_effect: number;
+    category_effect_source: 'category' | 'family' | 'none';
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
@@ -131,8 +163,17 @@ export interface RadarRow {
   listed_at: string | null;
   age_days: number | null;
   implied_value_usd: number;
+  implied_low_usd: number;
+  implied_high_usd: number;
+  plan_gas_usd: number;
+  net_low_usd: number;
+  breakeven_fdv_usd: number;
+  flagged_above_floor: boolean;
   multiple: number;
   multiple_source: string;
+  curve_value_usd: number;
+  category_effect: number;
+  category_effect_source: string;
   growth_multiplier: number;
   maturity_multiplier: number;
   breadth_multiplier: number;
@@ -165,6 +206,57 @@ export interface Comparable {
   tvl_usd: number;
 }
 
+/** The fitted size curve: least squares of log market cap on log TVL over the comparables. Full precision; the dashboard rounds for display. */
+export interface SizeCurve {
+  n: number;
+  slope: number;
+  intercept: number;
+  r2: number;
+}
+
+/** One category's correction against the curve: its shrunk median log-residual. */
+export interface CategoryEffect {
+  effect: number;
+  source: 'category' | 'family' | 'none';
+  n: number;
+}
+
+/** One FDV/TVL ratio band: the interquartile range and median of a ratio pool, with its source. */
+export interface RatioBand {
+  p25: number;
+  median: number;
+  p75: number;
+  n: number;
+  source: 'category' | 'family' | 'global';
+}
+
+/** The fitted model over one set of comparables: the curve plus per-category corrections and ratio bands. Built by buildFit; LOO rebuilds it per held-out comparable. */
+export interface SizeCurveFit {
+  curve: SizeCurve;
+  effectFor: (category: string | null) => CategoryEffect;
+  bandFor: (category: string | null) => RatioBand;
+}
+
+/** One leave-one-out backtest: predicted vs actual market cap over the held-out comparables. */
+export interface LooStats {
+  median_pred_actual: number;
+  median_abs_log_factor: number;
+  within_2x_pct: number;
+  within_3x_pct: number;
+  within_5x_pct: number;
+}
+
+/** The validation block shipped in data.js: the fit, the LOO backtest of the full model and of two baselines, and the band coverage. All computed at runtime from the snapshot. */
+export interface Validation {
+  curve: SizeCurve;
+  loo_full: LooStats;
+  loo_curve_only: LooStats;
+  loo_old_median: LooStats;
+  band_coverage_pct: number;
+  /** STATED ASSUMPTION (see FARMER_SHARE): the farmer share of launch FDV behind net_low_usd and breakeven_fdv_usd. */
+  farmer_share_assumption: number;
+}
+
 /** Everything the dashboard needs: the board, the live set, the multiples, and the model it runs. */
 export interface RadarData {
   as_of: string;
@@ -176,9 +268,13 @@ export interface RadarData {
   board_size: number;
   early_size: number;
   live_size: number;
-  /** Above-floor protocols that record no token but are NOT ranked: the snapshot carries no parent record, so the radar cannot verify they are not products of a protocol whose token already trades. The house watchlist excludes them for the same reason. */
+  /** Above-floor protocols that record no token but are NOT ranked: they fail the rankable rule (CEXs, bridges, wrapped/staked products, versioned pools, exchange products) — not launch candidates. Radar-4 includes every rankable above-floor protocol instead, so this counts the excluded remainder. */
   above_floor_set_aside: number;
+  /** Rankable above-floor protocols not on the watchlist that radar-4 now includes, each flagged_above_floor. */
+  above_floor_included: number;
   multiples: CategoryMultiples;
+  /** The radar-4 validation block: fit, LOO backtest, band coverage. Computed at runtime. */
+  validation: Validation;
   /** The token-bearing protocols the multiples are medians of, for the dashboard's in-browser derivation. */
   comparables: Comparable[];
   rows: RadarRow[];
@@ -217,6 +313,255 @@ function median(values: number[]): number {
 }
 
 /**
+ * A quantile by linear interpolation on the sorted values (type 7, the numpy default): the
+ * position (n-1)*p, interpolated between its two neighbours. Deterministic; the same rule the
+ * band coverage check uses.
+ */
+function quantile(values: number[], p: number): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const pos = (sorted.length - 1) * p;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return sorted[lo]!;
+  return sorted[lo]! * (hi - pos) + sorted[hi]! * (pos - lo);
+}
+
+/** Round to two decimals (cents); -0 becomes 0. */
+function round2(value: number): number {
+  const r = Math.round(value * 100) / 100;
+  return r === 0 ? 0 : r;
+}
+
+/**
+ * The least-squares fit of log market cap on log TVL over one set of comparables, with its
+ * R-squared. The comparables arrive in snapshot order; the sums are order-independent up to
+ * floating-point association, and the snapshot is fixed, so two runs agree byte for byte.
+ */
+function fitCurve(comparables: Comparable[]): SizeCurve {
+  const n = comparables.length;
+  let sx = 0;
+  let sy = 0;
+  for (const c of comparables) {
+    sx += Math.log(c.tvl_usd);
+    sy += Math.log(c.mcap_usd);
+  }
+  const mx = sx / n;
+  const my = sy / n;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (const c of comparables) {
+    const dx = Math.log(c.tvl_usd) - mx;
+    const dy = Math.log(c.mcap_usd) - my;
+    sxy += dx * dy;
+    sxx += dx * dx;
+    syy += dy * dy;
+  }
+  const slope = sxy / sxx;
+  const intercept = my - slope * mx;
+  const r2 = (sxy * sxy) / (sxx * syy);
+  return { n, slope, intercept, r2 };
+}
+
+/** The fitted size curve over the snapshot's comparables. */
+export function fitSizeCurve(snapshot: Snapshot): SizeCurve {
+  return fitCurve(comparablesOf(snapshot));
+}
+
+/**
+ * The fitted model over one set of comparables: the size curve, the per-category correction
+ * (median log-residual vs the curve, shrunk by n/(n+3) when the category has at least three
+ * comparables, else the pooled median residual of its family shrunk the same way, else zero),
+ * and the per-source FDV/TVL ratio bands (category IQR when the category has at least three
+ * comparables, else the family pooled IQR, else the global IQR).
+ */
+export function buildFit(comparables: Comparable[]): SizeCurveFit {
+  const curve = fitCurve(comparables);
+  const residByCategory = new Map<string, number[]>();
+  const residByFamily = new Map<string, number[]>();
+  const ratioByCategory = new Map<string, number[]>();
+  const ratioByFamily = new Map<string, number[]>();
+  const ratioGlobal: number[] = [];
+  for (const c of comparables) {
+    const residual = Math.log(c.mcap_usd) - (curve.intercept + curve.slope * Math.log(c.tvl_usd));
+    const ratio = c.mcap_usd / c.tvl_usd;
+    ratioGlobal.push(ratio);
+    if (c.category === null) continue;
+    const rc = residByCategory.get(c.category) ?? [];
+    rc.push(residual);
+    residByCategory.set(c.category, rc);
+    const rr = ratioByCategory.get(c.category) ?? [];
+    rr.push(ratio);
+    ratioByCategory.set(c.category, rr);
+    const family = FAMILY_OF[c.category];
+    if (family === undefined) continue;
+    const rf = residByFamily.get(family) ?? [];
+    rf.push(residual);
+    residByFamily.set(family, rf);
+    const qf = ratioByFamily.get(family) ?? [];
+    qf.push(ratio);
+    ratioByFamily.set(family, qf);
+  }
+
+  const effectFor = (category: string | null): CategoryEffect => {
+    if (category !== null) {
+      const own = residByCategory.get(category);
+      if (own !== undefined && own.length >= 3) {
+        return { effect: median(own) * (own.length / (own.length + 3)), source: 'category', n: own.length };
+      }
+      const family = FAMILY_OF[category];
+      if (family !== undefined) {
+        const pooled = residByFamily.get(family);
+        if (pooled !== undefined && pooled.length >= 1) {
+          return { effect: median(pooled) * (pooled.length / (pooled.length + 3)), source: 'family', n: pooled.length };
+        }
+      }
+    }
+    return { effect: 0, source: 'none', n: 0 };
+  };
+
+  const bandFor = (category: string | null): RatioBand => {
+    if (category !== null) {
+      const own = ratioByCategory.get(category);
+      if (own !== undefined && own.length >= 3) {
+        return { p25: quantile(own, 0.25), median: median(own), p75: quantile(own, 0.75), n: own.length, source: 'category' };
+      }
+      const family = FAMILY_OF[category];
+      if (family !== undefined) {
+        const pooled = ratioByFamily.get(family);
+        if (pooled !== undefined && pooled.length >= 1) {
+          return { p25: quantile(pooled, 0.25), median: median(pooled), p75: quantile(pooled, 0.75), n: pooled.length, source: 'family' };
+        }
+      }
+    }
+    return { p25: quantile(ratioGlobal, 0.25), median: median(ratioGlobal), p75: quantile(ratioGlobal, 0.75), n: ratioGlobal.length, source: 'global' };
+  };
+
+  return { curve, effectFor, bandFor };
+}
+
+/**
+ * The gas/fees one farm step costs, parsed out of its cost string — one deterministic rule:
+ *   1. A gas amount is a $ figure attached to "gas" or "fee(s)": "$X of gas", "$X of fees".
+ *      "under $X" counts as X. A weekly gas amount ("$X of gas a week") is counted x4 for the
+ *      30-day hold. A per-action amount ("per claim", "per move", "per borrow", "per swap",
+ *      "per channel") is counted ONCE for the hold.
+ *   2. No gas amount found: an explicit zero ("$0", "no fee", "nothing", "never pay",
+ *      "stays in the position") is $0; a capital, deposit, lock or optional-tier figure
+ *      ("of capital", "minimum", "deposit", "lock", "a year", "fund") is $0 — capital is
+ *      recoverable, not a cost, and an optional tier is not part of the base farm.
+ *   3. Anything else unparseable (a few hundred sats, percentage fees) counts as $2 flat.
+ * Capital is never a cost: only gas/fees count.
+ */
+export function parseGasCost(cost: string): number {
+  const s = cost.toLowerCase();
+  let total = 0;
+  let found = false;
+  const re = /\$([\d,]+(?:\.\d+)?)\s*(?:of\s+)?(?:gas|fees?)\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    found = true;
+    const amount = parseFloat(m[1]!.replace(/,/g, ''));
+    const after = s.slice(m.index + m[0].length, m.index + m[0].length + 24);
+    total += /a week|per week/.test(after) ? amount * 4 : amount;
+  }
+  if (found) return round2(total);
+  if (/\$0\b/.test(s) || /no fee|nothing|never pay|stays in the position/.test(s)) return 0;
+  if (/of capital|minimum|deposit|lock|\ba year\b|fund/.test(s)) return 0;
+  return 2;
+}
+
+/** The gas/fees a whole farm plan costs: the sum of its steps' parsed gas costs, in cents. */
+export function planGasUsd(steps: FarmStep[]): number {
+  let total = 0;
+  for (const step of steps) total += parseGasCost(step.cost);
+  return round2(total);
+}
+
+/** The growth, maturity and breadth multipliers one protocol gets (chains is an array: its length counts, never the array itself). */
+export function multipliers(
+  protocol: SnapshotProtocol,
+  asOf: string,
+  model: ModelConstants,
+): { growthPct: number; growthMult: number; maturityMult: number; breadthMult: number; age: number | null } {
+  const age = ageDays(asOf, protocol.listed_at);
+  const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, finite(protocol.change_7d, 0)));
+  const growthMult = 1 + (growthPct / 100) * model.growth_weight;
+  const ageForModel = age ?? model.unknown_age_days;
+  const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
+  const extraChains = Math.min(Math.max(protocol.chains.length - 1, 0), model.breadth_max_chains);
+  const breadthMult = 1 + model.breadth_step * extraChains;
+  return { growthPct, growthMult, maturityMult, breadthMult, age };
+}
+
+/** One LOO prediction's error, summarised over the held-out comparables. */
+function looSummary(predActual: number[]): LooStats {
+  const factors = predActual.map((r) => Math.exp(Math.abs(Math.log(r))));
+  const within = (x: number): number => round2((100 * factors.filter((f) => f <= x).length) / factors.length);
+  return {
+    median_pred_actual: round2(median(predActual)),
+    median_abs_log_factor: round2(median(factors)),
+    within_2x_pct: within(2),
+    within_3x_pct: within(3),
+    within_5x_pct: within(5),
+  };
+}
+
+/**
+ * The leave-one-out backtest over the 128 comparables: each held out once, the model refit
+ * without it, predicted as if pre-token (its own change_7d, listed_at and chains drive the
+ * multipliers). Three variants: the full radar-4 model; the plain global curve alone (curve
+ * only, no category correction and no multipliers — the bare size law); and the old radar-2
+ * median model (category median multiple, else family, else global, with the multipliers).
+ * Band coverage is the LOO share of comparables whose actual FDV/TVL falls inside their
+ * category IQR band (same source resolution as the band, refit without the held-out row).
+ */
+export function looBacktest(snapshot: Snapshot): { full: LooStats; curve_only: LooStats; old_median: LooStats; band_coverage_pct: number } {
+  const comparables = comparablesOf(snapshot);
+  const bySlug = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  const fullRatios: number[] = [];
+  const curveRatios: number[] = [];
+  const oldRatios: number[] = [];
+  let bandHits = 0;
+  for (const held of comparables) {
+    const train = comparables.filter((c) => c.slug !== held.slug);
+    const fit = buildFit(train);
+    const protocol = bySlug.get(held.slug)!;
+    const { growthMult, maturityMult, breadthMult } = multipliers(protocol, snapshot.as_of, MODEL);
+    const mult = growthMult * maturityMult * breadthMult;
+    const effect = fit.effectFor(held.category).effect;
+    fullRatios.push((Math.exp(fit.curve.intercept + fit.curve.slope * Math.log(held.tvl_usd) + effect) * mult) / held.mcap_usd);
+    curveRatios.push(Math.exp(fit.curve.intercept + fit.curve.slope * Math.log(held.tvl_usd)) / held.mcap_usd);
+    const old = multipleForTrain(held.category, train);
+    oldRatios.push((held.tvl_usd * old * mult) / held.mcap_usd);
+    const band = fit.bandFor(held.category);
+    const ratio = held.mcap_usd / held.tvl_usd;
+    if (ratio >= band.p25 && ratio <= band.p75) bandHits++;
+  }
+  return {
+    full: looSummary(fullRatios),
+    curve_only: looSummary(curveRatios),
+    old_median: looSummary(oldRatios),
+    band_coverage_pct: round2((100 * bandHits) / comparables.length),
+  };
+}
+
+/** The radar-2 multiple one category scores with, from one training set: its own median (n>=3), else its family's pooled median, else the global median. */
+function multipleForTrain(category: string | null, train: Comparable[]): number {
+  const ratio = (c: Comparable): number => c.mcap_usd / c.tvl_usd;
+  if (category !== null) {
+    const own = train.filter((c) => c.category === category).map(ratio);
+    if (own.length >= 3) return median(own);
+    const family = FAMILY_OF[category];
+    if (family !== undefined) {
+      const pooled = train.filter((c) => c.category !== null && FAMILIES[family]!.includes(c.category)).map(ratio);
+      if (pooled.length >= 1) return median(pooled);
+    }
+  }
+  return median(train.map(ratio));
+}
+
+/**
  * The categories pooled into one family, so a thin category still borrows the market's own multiple
  * from its neighbours instead of the global one. A category belongs to at most one family.
  */
@@ -250,10 +595,21 @@ export function comparablesOf(snapshot: Snapshot): Comparable[] {
     .map((p) => ({ slug: p.slug, category: p.category, mcap_usd: p.mcap_usd!, tvl_usd: p.tvl_usd }));
 }
 
-/** How many rankable protocols above the floor the board sets aside: they record no token, but the snapshot carries no parent record, so the radar cannot verify they are not products of a protocol whose token already trades. */
-export function aboveFloorSetAside(snapshot: Snapshot): number {
+/** How many rankable protocols above the floor, not on the watchlist, radar-4 includes (flagged_above_floor). */
+export function aboveFloorIncluded(snapshot: Snapshot): number {
   const watchlist = new Set(snapshot.watchlist);
   return snapshot.protocols.filter((p) => !watchlist.has(p.slug) && isRankable(p) && p.tvl_usd >= snapshot.floor_usd).length;
+}
+
+/**
+ * How many above-floor protocols that record no token the board sets aside: they fail the
+ * rankable rule (CEXs, bridges, wrapped/staked products, versioned pools, exchange products),
+ * so they are not launch candidates. Radar-4 includes every rankable above-floor protocol, so
+ * the remainder set aside is exactly this excluded count.
+ */
+export function aboveFloorSetAside(snapshot: Snapshot): number {
+  const watchlist = new Set(snapshot.watchlist);
+  return snapshot.protocols.filter((p) => !watchlist.has(p.slug) && isPreToken(p) && !isRankable(p) && p.tvl_usd >= snapshot.floor_usd).length;
 }
 
 /**
@@ -306,14 +662,20 @@ export function multipleFor(category: string | null, multiples: CategoryMultiple
   return { value: multiples.global, source: 'global' };
 }
 
-/** The multipliers and the implied value one protocol gets under `model` and the market's multiples. */
+/** The multipliers and the implied value one protocol gets under the radar-4 model: the fitted size curve plus its category correction, then the growth, maturity and breadth multipliers. The band scales the implied value by the p25/median and p75/median FDV/TVL ratios of the row's multiple source (category, else family, else global — the same resolution as the multiples table). */
 export function impliedValue(
   protocol: SnapshotProtocol,
   asOf: string,
   model: ModelConstants,
+  fit: SizeCurveFit,
   multiples: CategoryMultiples,
 ): {
   implied: number;
+  impliedLow: number;
+  impliedHigh: number;
+  curveValue: number;
+  categoryEffect: number;
+  categoryEffectSource: 'category' | 'family' | 'none';
   multiple: number;
   multipleSource: 'category' | 'family' | 'global';
   growthPct: number;
@@ -322,16 +684,15 @@ export function impliedValue(
   breadthMult: number;
   age: number | null;
 } {
-  const age = ageDays(asOf, protocol.listed_at);
   const { value: multiple, source: multipleSource } = multipleFor(protocol.category, multiples);
-  const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, finite(protocol.change_7d, 0)));
-  const growthMult = 1 + (growthPct / 100) * model.growth_weight;
-  const ageForModel = age ?? model.unknown_age_days;
-  const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-  const extraChains = Math.min(Math.max(protocol.chains.length - 1, 0), model.breadth_max_chains);
-  const breadthMult = 1 + model.breadth_step * extraChains;
-  const implied = Math.max(1, Math.round(protocol.tvl_usd * multiple * growthMult * maturityMult * breadthMult));
-  return { implied, multiple, multipleSource, growthPct, growthMult, maturityMult, breadthMult, age };
+  const { growthPct, growthMult, maturityMult, breadthMult, age } = multipliers(protocol, asOf, model);
+  const { effect: categoryEffect, source: categoryEffectSource } = fit.effectFor(protocol.category);
+  const curveValue = Math.exp(fit.curve.intercept + fit.curve.slope * Math.log(protocol.tvl_usd) + categoryEffect);
+  const implied = Math.max(1, Math.round(curveValue * growthMult * maturityMult * breadthMult));
+  const band = fit.bandFor(protocol.category);
+  const impliedLow = Math.max(1, Math.round(implied * (band.p25 / band.median)));
+  const impliedHigh = Math.max(implied, Math.round(implied * (band.p75 / band.median)));
+  return { implied, impliedLow, impliedHigh, curveValue, categoryEffect, categoryEffectSource, multiple, multipleSource, growthPct, growthMult, maturityMult, breadthMult, age };
 }
 
 /** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
@@ -373,52 +734,81 @@ function bySlug(protocols: SnapshotProtocol[]): Map<string, SnapshotProtocol> {
 // with the board figure (a 4-decimal multiple alone moved Steakhouse by ~$105k). The page
 // rounds only for display; the data stays full precision so board and browser always agree.
 
+/** The step prepended to the farm plan of an above-floor flagged row: the snapshot carries no parent record for these protocols, so the farmer checks first that the row is not a product of a protocol whose token already trades. */
+export const ABOVE_FLOOR_VERIFY_STEP =
+  'Verify this is not a product of a protocol whose token already trades — the snapshot carries no parent record — before farming it.';
+
 /** The protocols the board ranks, strongest first, with ranks 1..n. */
-export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL, multiples: CategoryMultiples = categoryMultiples(snapshot)): BoardRow[] {
+export function buildBoard(
+  snapshot: Snapshot,
+  model: ModelConstants = MODEL,
+  multiples: CategoryMultiples = categoryMultiples(snapshot),
+  fit: SizeCurveFit = buildFit(comparablesOf(snapshot)),
+): BoardRow[] {
   const index = bySlug(snapshot.protocols);
+  const watchlist = new Set(snapshot.watchlist);
   const chosen = new Map<string, SnapshotProtocol>();
   // The watchlist is the floor: every slug present in the snapshot, whatever the rankable rule says.
   for (const slug of snapshot.watchlist) {
     const p = index.get(slug);
     if (p !== undefined) chosen.set(slug, p);
   }
-  // The early radar: every rankable protocol below the watchlist floor, all of them, not a capped
-  // top-N. A chosen protocol stays chosen; a watchlist row is never replaced by an early one.
+  // The early radar: every rankable protocol at any TVL, all of them, not a capped top-N — the
+  // floor is the watchlist's, never a ceiling. Radar-4 includes the rankable protocols above the
+  // floor too (flagged below); a chosen protocol stays chosen, a watchlist row is never replaced.
   for (const p of snapshot.protocols) {
-    if (!chosen.has(p.slug) && isRankable(p) && p.tvl_usd < snapshot.floor_usd) chosen.set(p.slug, p);
+    if (!chosen.has(p.slug) && isRankable(p)) chosen.set(p.slug, p);
   }
 
   const scored = [...chosen.values()].map((p) => {
-    const v = impliedValue(p, snapshot.as_of, model, multiples);
-    return { p, ...v };
+    const v = impliedValue(p, snapshot.as_of, model, fit, multiples);
+    const steps = farmSteps(p, v.age);
+    const planGas = planGasUsd(steps);
+    const netLow = Math.round(v.impliedLow * FARMER_SHARE - planGas);
+    const breakeven = Math.round(planGas / FARMER_SHARE);
+    const flagged = !watchlist.has(p.slug) && p.tvl_usd >= snapshot.floor_usd;
+    return { p, ...v, steps, planGas, netLow, breakeven, flagged };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
-  return scored.map((s, i) => ({
-    rank: i + 1,
-    slug: s.p.slug,
-    name: s.p.name,
-    category: s.p.category,
-    chains: s.p.chains,
-    tvl_usd: s.p.tvl_usd,
-    change_7d: s.p.change_7d,
-    mcap_usd: s.p.mcap_usd,
-    listed_at: s.p.listed_at,
-    gecko_id: s.p.gecko_id,
-    symbol: s.p.symbol,
-    token_status: 'pre-token',
-    age_days: s.age,
-    implied_value_usd: s.implied,
-    model: {
-      multiple: s.multiple,
-      multiple_source: s.multipleSource,
-      growth_pct: s.growthPct,
-      growth_multiplier: s.growthMult,
-      maturity_multiplier: s.maturityMult,
-      breadth_multiplier: s.breadthMult,
+  return scored.map((s, i) => {
+    const farmStepsText = s.steps.map(stepText);
+    if (s.flagged) farmStepsText.unshift(ABOVE_FLOOR_VERIFY_STEP);
+    return {
+      rank: i + 1,
+      slug: s.p.slug,
+      name: s.p.name,
+      category: s.p.category,
+      chains: s.p.chains,
+      tvl_usd: s.p.tvl_usd,
+      change_7d: s.p.change_7d,
+      mcap_usd: s.p.mcap_usd,
+      listed_at: s.p.listed_at,
+      gecko_id: s.p.gecko_id,
+      symbol: s.p.symbol,
+      token_status: 'pre-token',
       age_days: s.age,
-    },
-    farm_steps: farmSteps(s.p, s.age).map(stepText),
-  }));
+      implied_value_usd: s.implied,
+      implied_low_usd: s.impliedLow,
+      implied_high_usd: s.impliedHigh,
+      plan_gas_usd: s.planGas,
+      net_low_usd: s.netLow,
+      breakeven_fdv_usd: s.breakeven,
+      flagged_above_floor: s.flagged,
+      model: {
+        multiple: s.multiple,
+        multiple_source: s.multipleSource,
+        curve_value_usd: s.curveValue,
+        category_effect: s.categoryEffect,
+        category_effect_source: s.categoryEffectSource,
+        growth_pct: s.growthPct,
+        growth_multiplier: s.growthMult,
+        maturity_multiplier: s.maturityMult,
+        breadth_multiplier: s.breadthMult,
+        age_days: s.age,
+      },
+      farm_steps: farmStepsText,
+    };
+  });
 }
 
 /** A step as one string: its action, then its cost and time, within the gate's 20..600 characters. */
@@ -548,8 +938,17 @@ export function radarRow(row: BoardRow): RadarRow {
     listed_at: row.listed_at,
     age_days: row.age_days,
     implied_value_usd: row.implied_value_usd,
+    implied_low_usd: row.implied_low_usd,
+    implied_high_usd: row.implied_high_usd,
+    plan_gas_usd: row.plan_gas_usd,
+    net_low_usd: row.net_low_usd,
+    breakeven_fdv_usd: row.breakeven_fdv_usd,
+    flagged_above_floor: row.flagged_above_floor,
     multiple: row.model.multiple,
     multiple_source: row.model.multiple_source,
+    curve_value_usd: row.model.curve_value_usd,
+    category_effect: row.model.category_effect,
+    category_effect_source: row.model.category_effect_source,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
     breadth_multiplier: row.model.breadth_multiplier,
@@ -560,9 +959,12 @@ export function radarRow(row: BoardRow): RadarRow {
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const multiples = categoryMultiples(snapshot);
-  const board = buildBoard(snapshot, model, multiples);
+  const comparables = comparablesOf(snapshot);
+  const fit = buildFit(comparables);
+  const board = buildBoard(snapshot, model, multiples, fit);
   const live = liveRows(snapshot);
   const early = board.filter((r) => !snapshot.watchlist.includes(r.slug)).length;
+  const loo = looBacktest(snapshot);
   const radar: RadarData = {
     as_of: snapshot.as_of,
     source: snapshot.source,
@@ -574,8 +976,17 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     early_size: early,
     live_size: live.length,
     above_floor_set_aside: aboveFloorSetAside(snapshot),
+    above_floor_included: aboveFloorIncluded(snapshot),
     multiples,
-    comparables: comparablesOf(snapshot),
+    validation: {
+      curve: fit.curve,
+      loo_full: loo.full,
+      loo_curve_only: loo.curve_only,
+      loo_old_median: loo.old_median,
+      band_coverage_pct: loo.band_coverage_pct,
+      farmer_share_assumption: FARMER_SHARE,
+    },
+    comparables,
     rows: board.map(radarRow),
     live,
   };
@@ -641,6 +1052,12 @@ export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null
     if (steps.length < 3 || steps.length > 12) return `${r.slug} has ${steps.length} farm steps`;
     for (const s of steps) if (s.length < 20 || s.length > 600) return `${r.slug} has a farm step of ${s.length} characters`;
     if (!Number.isSafeInteger(r.implied_value_usd) || r.implied_value_usd <= 0) return `${r.slug} has implied value ${r.implied_value_usd}`;
+    if (!(r.implied_low_usd <= r.implied_value_usd && r.implied_value_usd <= r.implied_high_usd)) {
+      return `${r.slug} has a band that does not contain its implied value (${r.implied_low_usd}..${r.implied_high_usd} vs ${r.implied_value_usd})`;
+    }
+    if (!(r.plan_gas_usd >= 0) || !Number.isSafeInteger(r.net_low_usd) || !Number.isSafeInteger(r.breakeven_fdv_usd)) {
+      return `${r.slug} has a bad farm verdict (gas ${r.plan_gas_usd}, net ${r.net_low_usd}, breakeven ${r.breakeven_fdv_usd})`;
+    }
   }
   return null;
 }
