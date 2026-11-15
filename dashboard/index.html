@@ -3,19 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar (radar-4): pre-token protocols ranked by implied value</title>
+<title>Token Radar (radar-5): pre-token protocols ranked by implied value</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <a class="skip" href="#board">Skip to the board</a>
 <main id="board" tabindex="-1" aria-busy="true">
   <!-- Static summary, replaced by the dashboard once data.js loads: the page
-       ranks 198 pre-token protocols — the 40 watchlist protocols, 138 early
+       ranks 198 pre-token protocols — the 40 watchlist protocols, 158 early
        protocols below the $50M floor, and 20 rankable protocols above the
        floor, each flagged — by implied value from a fitted size curve
        (log FDV = 6.96 + 0.52·log TVL, n=128, R²=0.19) plus a category
        correction. Every value is a band; every plan is netted at the band's
-       low. 72 above-floor protocols are set aside, not ranked. -->
+       low. Time-split validation (fit pre-2025, test 2025+) shows a vintage
+       bias: newer listings command higher FDV/TVL. All 198 farm plans are
+       researched; plan gas median $4. 72 above-floor protocols set aside. -->
   <div class="wrap">
     <h1>Token Radar</h1>
     <p>Pre-token protocols, ranked by implied value. Loading the board…</p>
