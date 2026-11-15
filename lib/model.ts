@@ -1,5 +1,8 @@
-// The token radar's model, version radar-2: one snapshot of the protocol universe in, one ranked
-// board out.
+// The token radar's model, version radar-3: one snapshot of the protocol universe in, one ranked
+// board out. Radar-3 keeps radar-2's scoring formula byte for byte, and ships the derivation
+// with the board: the 128 token-bearing comparables the multiples come from, so the dashboard
+// re-derives every multiple in the browser and shows its work, and the count of above-floor
+// protocols the board sets aside because the snapshot carries no parent record to clear them.
 //
 // The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and every other
 // rankable pre-token protocol below the watchlist floor: the early rows the radar exists to find. A
@@ -75,7 +78,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'radar-3';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -154,6 +157,14 @@ export interface CategoryMultiples {
   global: number;
 }
 
+/** One token-bearing comparable: the market's own mcap/TVL ratio, shipped so the dashboard re-derives the multiples in the browser instead of taking them on trust. */
+export interface Comparable {
+  slug: string;
+  category: string | null;
+  mcap_usd: number;
+  tvl_usd: number;
+}
+
 /** Everything the dashboard needs: the board, the live set, the multiples, and the model it runs. */
 export interface RadarData {
   as_of: string;
@@ -165,7 +176,11 @@ export interface RadarData {
   board_size: number;
   early_size: number;
   live_size: number;
+  /** Above-floor protocols that record no token but are NOT ranked: the snapshot carries no parent record, so the radar cannot verify they are not products of a protocol whose token already trades. The house watchlist excludes them for the same reason. */
+  above_floor_set_aside: number;
   multiples: CategoryMultiples;
+  /** The token-bearing protocols the multiples are medians of, for the dashboard's in-browser derivation. */
+  comparables: Comparable[];
   rows: RadarRow[];
   live: LiveRow[];
 }
@@ -220,6 +235,25 @@ export const FAMILIES: Record<string, string[]> = {
 const FAMILY_OF: Record<string, string> = {};
 for (const [family, members] of Object.entries(FAMILIES)) {
   for (const category of members) FAMILY_OF[category] = family;
+}
+
+/**
+ * The token-bearing comparables, in snapshot order: every protocol whose token the market prices
+ * above zero. A recorded market cap of exactly 0 is a dead token, not a protocol worth 0x its TVL,
+ * and a 0 ratio in the pool would drag every median down for no economic reason — the same rule
+ * categoryMultiples applies. Shipped in data.js so the dashboard re-derives the multiples in the
+ * browser instead of taking them on trust.
+ */
+export function comparablesOf(snapshot: Snapshot): Comparable[] {
+  return snapshot.protocols
+    .filter((p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0)
+    .map((p) => ({ slug: p.slug, category: p.category, mcap_usd: p.mcap_usd!, tvl_usd: p.tvl_usd }));
+}
+
+/** How many rankable protocols above the floor the board sets aside: they record no token, but the snapshot carries no parent record, so the radar cannot verify they are not products of a protocol whose token already trades. */
+export function aboveFloorSetAside(snapshot: Snapshot): number {
+  const watchlist = new Set(snapshot.watchlist);
+  return snapshot.protocols.filter((p) => !watchlist.has(p.slug) && isRankable(p) && p.tvl_usd >= snapshot.floor_usd).length;
 }
 
 /**
@@ -539,7 +573,9 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     board_size: board.length,
     early_size: early,
     live_size: live.length,
+    above_floor_set_aside: aboveFloorSetAside(snapshot),
     multiples,
+    comparables: comparablesOf(snapshot),
     rows: board.map(radarRow),
     live,
   };

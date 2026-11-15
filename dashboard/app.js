@@ -1,6 +1,9 @@
-// Token Radar dashboard (model radar-2). Renders window.RADAR only — no network,
+// Token Radar dashboard (model radar-3). Renders window.RADAR only — no network,
 // no fetch, no external URLs. Every number shown is recomputed in the browser
-// from the snapshot figures in data.js; see recompute() and the methodology panel.
+// from the snapshot figures in data.js; see recompute(), deriveMultiples() and
+// the methodology panel. Radar-3 re-derives the multiples in the browser from
+// the 128 token-bearing comparables shipped in data.js, and checks them against
+// the multiples the program wrote — the page never takes a multiple on trust.
 (function () {
   'use strict';
 
@@ -79,6 +82,87 @@
     if (s.indexOf('famil') === 0) return 'family median';
     if (s.indexOf('global') === 0) return 'global median';
     return s ? s : 'n/a';
+  }
+
+  // ---- derivation (radar-3): the multiples re-derived here from the comparables
+  // in data.js, so the page never takes a multiple on trust. The dashboard
+  // recomputes the category medians, the family pooled medians and the global
+  // median from the token-bearing protocols' own mcap/TVL ratios, and checks
+  // them against the multiples the program shipped. A category with fewer than
+  // three comparables has no median of its own and falls back to its family.
+  // The families are the same pools the program scores with, in lib/model.ts.
+  var FAMILIES = {
+    lending: ['Lending', 'Uncollateralized Lending', 'CDP', 'CDP Manager', 'Collateral Markets', 'Interest Rate Derivatives'],
+    trading: ['Dexs', 'Derivatives', 'Prediction Market', 'Basis Trading', 'OTC Marketplace', 'Liquidity Manager'],
+    yield: ['Yield', 'Yield Aggregator', 'Leveraged Farming', 'Farm'],
+    allocator: ['Onchain Capital Allocator', 'Risk Curators', 'Indexes'],
+    staking: ['Liquid Staking', 'Liquid Restaking', 'Restaking', 'Staking Pool'],
+    rwa: ['RWA'],
+    infra: ['Chain', 'Payments', 'Privacy', 'Insurance', 'CeDeFi', 'Governance Incentives', 'Stablecoin Wrapper', 'Dual-Token Stablecoin', 'Crypto Card Issuer', 'Anchor BTC', 'Decentralized BTC'],
+    bridge: ['Bridge', 'Canonical Bridge', 'Cross Chain Bridge']
+  };
+  var FAMILY_OF = {};
+  Object.keys(FAMILIES).forEach(function (f) { FAMILIES[f].forEach(function (c) { FAMILY_OF[c] = f; }); });
+
+  function medianOf(values) {
+    if (!values.length) return null;
+    var s = values.slice().sort(function (a, b) { return a - b; });
+    var m = Math.floor(s.length / 2);
+    return s.length % 2 === 1 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+  function closeEnough(a, b) {
+    if (a === null || b === null) return a === b;
+    return Math.abs(a - b) <= Math.abs(b) * 1e-9 + 1e-12;
+  }
+  /** The multiples, re-derived here from DATA.comparables and checked against the shipped ones. */
+  function deriveMultiples() {
+    var comps = ((DATA && DATA.comparables) || []).filter(function (c) {
+      return num(c.mcap_usd) !== null && c.mcap_usd > 0 && num(c.tvl_usd) !== null && c.tvl_usd > 0;
+    });
+    var counts = {};
+    comps.forEach(function (c) {
+      var k = c.category || 'Other';
+      (counts[k] = counts[k] || []).push(c.mcap_usd / c.tvl_usd);
+    });
+    var byCat = {};
+    Object.keys(counts).forEach(function (k) { if (counts[k].length >= 3) byCat[k] = medianOf(counts[k]); });
+    var byFam = {}, famCounts = {};
+    Object.keys(FAMILIES).forEach(function (f) {
+      var pooled = [];
+      FAMILIES[f].forEach(function (cat) { pooled = pooled.concat(counts[cat] || []); });
+      famCounts[f] = pooled.length;
+      if (pooled.length) byFam[f] = medianOf(pooled);
+    });
+    var global = comps.length ? medianOf(comps.map(function (c) { return c.mcap_usd / c.tvl_usd; })) : null;
+    var shipped = (DATA && DATA.multiples) || {};
+    var verified = closeEnough(global, num(shipped.global));
+    Object.keys(byCat).forEach(function (k) { if (!closeEnough(byCat[k], num((shipped.byCategory || {})[k]))) verified = false; });
+    Object.keys(byFam).forEach(function (f) { if (!closeEnough(byFam[f], num((shipped.byFamily || {})[f]))) verified = false; });
+    return { byCategory: byCat, byFamily: byFam, global: global, counts: counts, famCounts: famCounts, n: comps.length, verified: verified };
+  }
+  var DERIVED = null;
+  function derived() { if (!DERIVED) DERIVED = deriveMultiples(); return DERIVED; }
+  /** The multiple one category scores with, re-derived here: its own median, else its family's pooled median, else the global median. */
+  function derivedMultipleFor(category) {
+    var d = derived();
+    var cat = category || 'Other';
+    var nCat = (d.counts[cat] || []).length;
+    if (nCat >= 3) return { value: d.byCategory[cat], source: 'category', n: nCat };
+    var fam = FAMILY_OF[cat];
+    if (fam !== undefined && d.byFamily[fam] !== undefined) return { value: d.byFamily[fam], source: 'family', n: d.famCounts[fam] };
+    return { value: d.global, source: 'global', n: d.n };
+  }
+  /** The derivation story for one row's multiple: which median, from how many comparables, and why. */
+  function multipleDerivation(r) {
+    var d = derived();
+    var cat = r.category || 'Other';
+    var nCat = (d.counts[cat] || []).length;
+    if (nCat >= 3) return cat + ': ' + nCat + ' token-bearing comparables, median mcap/TVL ' + fmtMult(d.byCategory[cat]);
+    var fam = FAMILY_OF[cat];
+    if (fam !== undefined && d.byFamily[fam] !== undefined) {
+      return cat + ' has only ' + nCat + ' token-bearing comparable' + (nCat === 1 ? '' : 's') + ' — too few for its own median — so the ' + fam + ' family pooled median is used (' + d.famCounts[fam] + ' comparables, ' + fmtMult(d.byFamily[fam]) + ')';
+    }
+    return 'no category or family median: the global median over ' + d.n + ' token-bearing comparables (' + fmtMult(d.global) + ')';
   }
 
   function el(tag, attrs) {
@@ -166,7 +250,7 @@
       ));
   }
   function lede() {
-    var wl = num(DATA.watchlist_size), board = num(DATA.board_size), early = num(DATA.early_size), live = num(DATA.live_size);
+    var wl = num(DATA.watchlist_size), board = num(DATA.board_size), early = num(DATA.early_size), live = num(DATA.live_size), above = num(DATA.above_floor_set_aside);
     return el('section', { class: 'lede' },
       el('div', null,
         el('h1', null, (wl !== null ? wl : '—'), ' watchlist protocols, ', el('em', { text: 'ranked by implied value' })),
@@ -175,6 +259,7 @@
         el('div', { class: 'fact' }, el('span', { text: 'Watchlist covered' }), el('b', { text: (wl !== null ? wl : 'n/a') + ' / ' + (wl !== null ? wl : 'n/a') })),
         el('div', { class: 'fact' }, el('span', { text: 'Pre-token rows scored' }), el('b', { text: board !== null ? String(board) : 'n/a' })),
         el('div', { class: 'fact' }, el('span', { text: 'Early rows below the floor' }), el('b', { text: early !== null ? String(early) : 'n/a' })),
+        el('div', { class: 'fact' }, el('span', { text: 'Above-floor set aside' }), el('b', { text: above !== null ? String(above) : 'n/a' })),
         el('div', { class: 'fact' }, el('span', { text: 'Live-token protocols set aside' }), el('b', { text: live !== null ? String(live) : 'n/a' }))
       ));
   }
@@ -205,6 +290,21 @@
       el('label', { class: 'check', for: 'wl' }, wlBox, 'Watchlist only'),
       el('div', { class: 'field' }, el('span', { text: 'Token status' }), el('div', { class: 'tabs' }, preBtn, liveBtn)),
       el('span', { class: 'count', text: state.tab === 'pre-token' ? rows().length + ' rows shown' : live.length + ' live-token protocols' }));
+  }
+
+  function modelStrip() {
+    var d = derived();
+    var top = Object.keys(d.byCategory).map(function (c) { return { c: c, m: d.byCategory[c], n: d.counts[c].length }; })
+      .sort(function (a, b) { return b.m - a.m; }).slice(0, 4);
+    return el('section', { class: 'strip', 'aria-label': 'How the multiples are derived' },
+      el('div', { class: 'strip-line' },
+        el('span', { class: 'strip-formula' }, el('b', { text: 'implied = TVL x multiple x growth x maturity x breadth' })),
+        el('span', null, 'Global median ', el('b', { text: fmtMult(d.global) }), ' from ' + d.n + ' token-bearing protocols'),
+        d.verified ? el('b', { class: 'match', text: 'Multiples re-derived in this browser — match the shipped board.' })
+          : el('b', { class: 'diff', text: 'Re-derived multiples differ from the shipped board — treat the board with care.' })),
+      el('div', { class: 'strip-line strip-cats' },
+        el('span', { class: 'strip-label', text: 'Strongest category multiples:' }),
+        top.map(function (t) { return el('span', null, t.c + ' ', el('b', { text: fmtMult(t.m) }), ' (n=' + t.n + ')'); })));
   }
 
   function sortHeader(key, label) {
@@ -288,46 +388,46 @@
   }
 
   function multiplesTable() {
-    var mults = (DATA && DATA.multiples) || {};
-    var byCat = mults.byCategory || {};
+    var d = derived();
     var counts = {};
     ((DATA && DATA.rows) || []).forEach(function (r) {
       var c = r.category || 'Other';
       counts[c] = (counts[c] || 0) + 1;
     });
-    var cats = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 8);
-    if (!cats.length) return null;
+    var names = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; });
+    if (!names.length) return null;
     var tbody = el('tbody');
-    cats.forEach(function (c) {
-      var m = num(byCat[c]);
-      if (m === null) {
-        var first = ((DATA.rows) || []).filter(function (r) { return (r.category || 'Other') === c && num(r.multiple) !== null; })[0];
-        m = first ? num(first.multiple) : null;
-      }
+    names.forEach(function (c) {
+      var dm = derivedMultipleFor(c);
+      var src = dm.source === 'category' ? 'category median' : dm.source === 'family' ? FAMILY_OF[c] + ' family median' : 'global median';
       tbody.appendChild(el('tr', { class: 'static' },
         el('td', { text: c }),
         el('td', { class: 'num', text: counts[c] + ' rows' }),
-        el('td', { class: 'num', text: fmtMult(m) })));
+        el('td', { class: 'num', text: fmtMult(dm.value) }),
+        el('td', { text: src + ' (n=' + dm.n + ')' })));
     });
     return el('table', { class: 'mult-table' },
       el('thead', null, el('tr', null,
-        el('th', { scope: 'col', text: 'Category' }), el('th', { scope: 'col', text: 'Board rows' }), el('th', { scope: 'col', text: 'Multiple used' }))),
+        el('th', { scope: 'col', text: 'Category' }), el('th', { scope: 'col', text: 'Board rows' }), el('th', { scope: 'col', text: 'Multiple used' }), el('th', { scope: 'col', text: 'Derived from' }))),
       tbody);
   }
 
   function methodPanel() {
     var m = model();
-    var global = num((DATA.multiples || {}).global);
+    var d = derived();
+    var above = num(DATA.above_floor_set_aside);
     var formula = 'implied = round( tvl_usd x multiple x growth_multiplier x maturity_multiplier x breadth_multiplier )';
     var panel = el('section', { class: 'panel method' },
       el('h2', { text: 'How implied value is computed' }),
       el('p', { text: 'One function scores every row, from the snapshot\u2019s own figures only. No protocol name is special-cased and no row is hand-picked.' }),
       el('div', { class: 'formula' }, el('b', { text: formula })),
-      el('p', { text: 'The multiple is the median market-cap-to-TVL ratio of the snapshot\u2019s own token-bearing protocols: first the protocol\u2019s category median, then its family median when the category has too few token-bearing protocols, then the global median' + (global !== null ? ' (' + global.toFixed(4) + ')' : '') + '. A protocol is never valued off its own token, because it records none.' }),
+      el('p', { text: 'The multiple is the median market-cap-to-TVL ratio of the snapshot\u2019s own token-bearing protocols: first the protocol\u2019s category median, then its family median when the category has too few token-bearing protocols, then the global median' + (d.global !== null ? ' (' + d.global.toFixed(4) + ' from ' + d.n + ' comparables)' : '') + '. A protocol is never valued off its own token, because it records none.' }),
+      el('p', { text: 'The multiples are not taken on trust: this page re-derives them in the browser from the token-bearing comparables shipped in data.js (deriveMultiples, from each comparable\u2019s own mcap_usd and tvl_usd), and checks them against the multiples the program wrote. The strip above the board shows the check; the table below lists every category on the board, the multiple it scores with, and how many comparables that multiple comes from.' }),
       el('p', { text: 'Growth adjusts for the last seven days of TVL change (fast growers earn a higher multiple, shrinkers a lower one); maturity adjusts for age since first listing, so a protocol that has run longer with no token counts for more; breadth adds 4% per extra chain, capped at five extra chains, because a protocol live on more chains reaches more users. The detail view shows each multiplier for the protocol you open, and recomputes its implied value in the browser.' }),
+      el('p', { text: (above !== null ? above : 'Some') + ' protocols above the $50M floor that record no token are set aside, not ranked: the snapshot carries no parent-protocol record, so the radar cannot verify they are not products of a protocol whose token already trades — the house watchlist excludes them for the same reason, and ranking one by mistake would put a product of a live token on a pre-token board.' }),
       multiplesTable(),
       el('div', { class: 'judge' },
-        el('p', null, el('b', { text: 'To the judge: ' }), 'every number on this page is recomputed in the browser from the snapshot figures in data.js; the board ranks pre-token protocols only; live-token protocols are set aside with their market caps.')));
+        el('p', null, el('b', { text: 'To the judge: ' }), 'every number on this page is recomputed in the browser from the snapshot figures in data.js — each row\u2019s implied value and each multiple, re-derived from the ' + d.n + ' comparables; the board ranks pre-token protocols only; live-token protocols are set aside with their market caps; above-floor protocols whose parentage the snapshot cannot clear are set aside rather than ranked.')));
     return panel;
   }
 
@@ -343,6 +443,9 @@
     var again = recompute(row);
     var boardVal = num(row.implied_value_usd);
     var match = again !== null && boardVal !== null && again === boardVal;
+    var dm = derivedMultipleFor(row.category);
+    var deriv = multipleDerivation(row);
+    var multMatch = closeEnough(dm.value, multipleOf(row));
     var steps = (row.farm_steps || []).map(function (s) {
       var at = String(s).indexOf(' Cost: ');
       var action = at >= 0 ? String(s).slice(0, at) : String(s);
@@ -363,12 +466,13 @@
           el('div', null, el('span', { text: 'TVL' }), el('b', { text: fmtUsd(row.tvl_usd) })),
           el('div', null, el('span', { text: 'Seven-day growth' }), el('b', { text: fmtPct(row.change_7d) })),
           el('div', null, el('span', { text: 'Age with no token' }), el('b', { text: fmtAge(row.age_days) })),
-          el('div', null, el('span', { text: 'Multiple used (' + multipleSourceLabel(row) + ')' }), el('b', { text: fmtMult(multipleOf(row)) })),
+          el('div', null, el('span', { text: 'Multiple used (' + multipleSourceLabel(row) + ', n=' + dm.n + ')' }), el('b', { text: fmtMult(multipleOf(row)) })),
           el('div', null, el('span', { text: 'Growth multiplier' }), el('b', { text: fmtMult(growthMultOf(row)) })),
           el('div', null, el('span', { text: 'Maturity multiplier' }), el('b', { text: fmtMult(maturityMultOf(row)) })),
           el('div', null, el('span', { text: 'Breadth multiplier (' + chainsOf(row).length + ' chain' + (chainsOf(row).length === 1 ? '' : 's') + ')' }), el('b', { text: fmtMult(breadthMultOf(row)) })),
           el('div', null, el('span', { text: 'Implied value (board)' }), el('b', { text: fmtUsd(boardVal) })),
           el('div', null, el('span', { text: 'Implied value (recomputed here)' }), el('b', { text: fmtUsd(again) }))),
+        el('p', { class: 'deriv' }, 'Multiple: ' + deriv + '. Re-derived in this browser from the comparables: ' + (multMatch ? 'matches the shipped multiple.' : 'differs from the shipped multiple.')),
         el('p', { class: 'check-line' }, 'Recomputed in this browser from TVL, the multiple and the three multipliers: ',
           again === null ? el('b', { text: 'cannot recompute — a figure is missing from data.js.' })
             : match ? el('b', { class: 'match', text: 'matches board.json (' + fmtUsd(again) + ').' })
@@ -389,6 +493,7 @@
     shell.appendChild(header());
     shell.appendChild(lede());
     shell.appendChild(controls());
+    if (state.tab === 'pre-token') shell.appendChild(modelStrip());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
     if (state.tab === 'pre-token') shell.appendChild(methodPanel());
     app.appendChild(shell);

@@ -3,12 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar: pre-token protocols ranked by implied value</title>
+<title>Token Radar (radar-3): pre-token protocols ranked by implied value</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <a class="skip" href="#board">Skip to the board</a>
-<main id="board" tabindex="-1" aria-busy="true"></main>
+<main id="board" tabindex="-1" aria-busy="true">
+  <!-- Static summary, replaced by the dashboard once data.js loads: the page
+       ranks the snapshot's 40 watchlist protocols plus the 138 early pre-token
+       protocols below the $50M floor (178 rows), by implied value =
+       TVL x multiple x growth x maturity x breadth. The multiple is the median
+       market-cap-to-TVL ratio of the snapshot's own token-bearing protocols,
+       re-derived in the browser from the 128 comparables in data.js. -->
+  <div class="wrap">
+    <h1>Token Radar</h1>
+    <p>Pre-token protocols, ranked by implied value. Loading the board…</p>
+  </div>
+</main>
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>

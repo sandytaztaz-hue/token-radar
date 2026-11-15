@@ -1,5 +1,8 @@
 /* Token Radar — ink dark theme. One accent (electric lime), one surface,
-   hairline borders, monospace numerals. No network, no images. */
+   hairline borders, monospace numerals. No network, no images.
+   Radar-3: a tighter lede and table so the board's first screen carries the
+   model strip as well as the top rows, and a wider detail dialog so a full
+   farm plan fits the viewport instead of cutting off mid-step. */
 :root {
   --bg: #0d1117;
   --surface: #131a22;
@@ -24,7 +27,7 @@ body {
   font: 400 15px/1.55 var(--font);
 }
 h1, h2, h3 { margin: 0; letter-spacing: -.02em; line-height: 1.2; }
-h1 { font-size: 30px; font-weight: 700; }
+h1 { font-size: 27px; font-weight: 700; }
 h2 { font-size: 19px; font-weight: 650; }
 h3 { font-size: 15px; font-weight: 650; }
 p { margin: 0; }
@@ -44,16 +47,16 @@ button { cursor: pointer; }
 .meta span { font-family: var(--num); font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
 .meta span b { color: var(--ink); font-weight: 600; }
 
-.lede { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, .6fr); gap: 32px; padding: 28px 0 22px; }
+.lede { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, .6fr); gap: 32px; padding: 20px 0 16px; }
 .lede h1 em { font-style: normal; color: var(--accent); }
-.lede p { color: var(--muted); max-width: 60ch; margin-top: 10px; }
+.lede p { color: var(--muted); max-width: 60ch; margin-top: 8px; }
 .facts { display: grid; gap: 2px; align-content: start; border-left: 1px solid var(--border); padding-left: 24px; }
-.fact { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 7px 0; border-bottom: 1px dashed var(--border); }
+.fact { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 5px 0; border-bottom: 1px dashed var(--border); }
 .fact:last-child { border-bottom: 0; }
 .fact span { color: var(--muted); font-size: 13px; }
 .fact b { font-family: var(--num); font-size: 15px; font-weight: 600; white-space: nowrap; }
 
-.controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px 0; border-top: 1px solid var(--border); }
+.controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 14px 0; border-top: 1px solid var(--border); }
 .field { display: grid; gap: 5px; }
 .field label, .field > span { color: var(--muted); font-size: 12px; }
 .field input, .field select { min-height: 38px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); min-width: 170px; }
@@ -66,11 +69,24 @@ button { cursor: pointer; }
 .tabs button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 .count { margin-left: auto; color: var(--muted); font-size: 13px; font-family: var(--num); align-self: center; }
 
+/* The model strip: the formula, the global median and the strongest category
+   multiples, with the in-browser re-derivation check — the derivation evidence
+   on the board's first screen, above the table. */
+.strip { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 12px 16px; margin-bottom: 14px; display: grid; gap: 6px; font-size: 13px; }
+.strip-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
+.strip-formula { font-family: var(--num); color: var(--ink); }
+.strip-formula b { color: var(--accent); font-weight: 600; }
+.strip span b { font-weight: 600; }
+.strip .match { color: var(--accent); }
+.strip .diff { color: var(--neg); }
+.strip-cats { color: var(--muted); }
+.strip-label { color: var(--faint); }
+
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
 .scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 caption { text-align: left; padding: 14px 16px; color: var(--muted); font-size: 13px; border-bottom: 1px solid var(--border); }
-th, td { padding: 11px 14px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+th, td { padding: 9px 14px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
 tbody tr:last-child td { border-bottom: 0; }
 th { color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 th button { display: inline-flex; gap: 5px; align-items: center; border: 0; background: none; padding: 0; color: inherit; font: inherit; }
@@ -101,31 +117,32 @@ tbody tr.static { cursor: default; }
 .method p { color: var(--muted); max-width: 78ch; }
 .formula { font-family: var(--num); font-size: 13px; line-height: 1.8; color: var(--ink); background: var(--bg); border: 1px solid var(--border); border-radius: var(--r); padding: 14px 16px; overflow-wrap: anywhere; }
 .formula b { color: var(--accent); font-weight: 600; }
-.mult-table { width: auto; min-width: 320px; }
+.mult-table { width: auto; min-width: 560px; font-size: 13px; }
 .mult-table th, .mult-table td { padding: 7px 12px; }
 .mult-table td:first-child { color: var(--muted); }
 .judge { border: 1px solid var(--accent); border-radius: var(--r); padding: 14px 16px; background: rgba(182, 243, 76, .06); }
 .judge p { color: var(--ink); }
 .judge b { color: var(--accent); }
 
-dialog.detail { border: 1px solid var(--border); background: var(--surface); color: var(--ink); border-radius: var(--r-lg); padding: 0; width: min(560px, 94vw); max-height: 88vh; }
+dialog.detail { border: 1px solid var(--border); background: var(--surface); color: var(--ink); border-radius: var(--r-lg); padding: 0; width: min(920px, 94vw); max-height: 94vh; }
 dialog.detail::backdrop { background: rgba(4, 8, 12, .72); }
-.d-body { padding: 24px; overflow-y: auto; max-height: 88vh; }
+.d-body { padding: 22px 24px; overflow-y: auto; max-height: 94vh; }
 .d-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .d-head .rank { font-family: var(--num); font-size: 12px; color: var(--accent); letter-spacing: .08em; text-transform: uppercase; }
 .d-head h2 { margin-top: 6px; font-size: 24px; }
 .d-head .sub { margin-top: 6px; }
 .close { flex: none; min-width: 34px; min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-2); font-weight: 600; }
-.d-sec { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
-.d-sec h3 { margin-bottom: 12px; }
-.eq { display: grid; gap: 8px; font-family: var(--num); font-size: 13px; }
+.d-sec { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.d-sec h3 { margin-bottom: 10px; }
+.eq { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 28px; font-family: var(--num); font-size: 13px; }
 .eq div { display: flex; justify-content: space-between; gap: 16px; }
 .eq span { color: var(--muted); }
 .eq b { font-weight: 600; text-align: right; }
-.check-line { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.deriv { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.check-line { margin-top: 10px; font-size: 13px; color: var(--muted); }
 .check-line b.match { color: var(--accent); }
 .check-line b.diff { color: var(--neg); }
-.steps { margin: 0; padding-left: 22px; display: grid; gap: 12px; }
+.steps { margin: 0; padding-left: 22px; display: grid; gap: 9px; }
 .steps li { padding-left: 4px; }
 .steps b { display: block; font-weight: 550; }
 .cost { color: var(--muted); font-size: 12px; font-family: var(--num); }
