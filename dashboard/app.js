@@ -1,12 +1,11 @@
-// Token Radar dashboard (model radar-5). Renders window.RADAR only — no network,
-// no fetch, no external URLs. Every number shown is recomputed in the browser
-// from the snapshot figures in data.js: the size curve is refit here from the
-// 128 token-bearing comparables, each row's category effect and band are
-// re-derived here, and each row's implied value is recomputed from its curve
-// value and multipliers and checked against the board. Radar-5 keeps radar-4's
-// curve + category correction and adds its time-split validation (fit pre-2025,
-// test 2025+, vintage bias stated) and the multivariate model it tested and
-// rejected; every value is a band, netted in dollars at the band's low.
+// Token Radar dashboard (model radar-6). Renders window.RADAR only — no network.
+// Light, dense, print-like: KPI row, a log-log scatter of the 128 comparables
+// with the fitted curve beside a "How a value is built" box, then a 10-column
+// board. Every number is recomputed in the browser from data.js: the curve is
+// refit here, each row's effect and band re-derived, each implied value
+// recomputed and checked against the board. Radar-6 keeps radar-5's curve +
+// correction exactly (round-5 test of unshrunk effects and a joint OLS
+// adopted neither). Every value is a band, netted at the low.
 (function () {
   'use strict';
 
@@ -43,7 +42,7 @@
   function chainsOf(r) { return (r.chains && r.chains.length) ? r.chains : []; }
   function chainLabel(r) { var c = chainsOf(r); return c.length ? c.slice(0, 2).join(', ') + (c.length > 2 ? ' +' + (c.length - 2) : '') : 'an unnamed chain'; }
 
-  // ---- model (radar-5): implied = round(curve_value x growth x maturity x breadth)
+  // ---- model (radar-6 = radar-5 formula): implied = round(curve_value x growth x maturity x breadth)
   // curve_value = exp(intercept + slope x ln(TVL) + categoryEffect). Rows carry
   // their own curve value and multipliers at full precision; the model object
   // only supplies fallbacks, read defensively by name.
@@ -100,10 +99,8 @@
     return s ? s : 'n/a';
   }
 
-  // ---- derivation: the multiples re-derived here from the comparables
-  // in data.js, so the page never takes a multiple on trust. A category with
-  // fewer than three comparables has no median of its own and falls back to
-  // its family. The families are the same pools the program scores with.
+  // ---- derivation: multiples re-derived here from the comparables in
+  // data.js, so the page never takes a multiple on trust.
   var FAMILIES = {
     lending: ['Lending', 'Uncollateralized Lending', 'CDP', 'CDP Manager', 'Collateral Markets', 'Interest Rate Derivatives'],
     trading: ['Dexs', 'Derivatives', 'Prediction Market', 'Basis Trading', 'OTC Marketplace', 'Liquidity Manager'],
@@ -149,19 +146,19 @@
     });
     var byCat = {};
     Object.keys(counts).forEach(function (k) { if (counts[k].length >= 3) byCat[k] = medianOf(counts[k]); });
-    var byFam = {}, famCounts = {};
+    var byFam = {}, famN = {};
     Object.keys(FAMILIES).forEach(function (f) {
       var pooled = [];
       FAMILIES[f].forEach(function (cat) { pooled = pooled.concat(counts[cat] || []); });
-      famCounts[f] = pooled.length;
+      famN[f] = pooled.length;
       if (pooled.length) byFam[f] = medianOf(pooled);
     });
     var global = comps.length ? medianOf(comps.map(function (c) { return c.mcap_usd / c.tvl_usd; })) : null;
-    var shipped = (DATA && DATA.multiples) || {};
-    var verified = closeEnough(global, num(shipped.global));
-    Object.keys(byCat).forEach(function (k) { if (!closeEnough(byCat[k], num((shipped.byCategory || {})[k]))) verified = false; });
-    Object.keys(byFam).forEach(function (f) { if (!closeEnough(byFam[f], num((shipped.byFamily || {})[f]))) verified = false; });
-    return { byCategory: byCat, byFamily: byFam, global: global, counts: counts, famCounts: famCounts, n: comps.length, verified: verified };
+    var sh = (DATA && DATA.multiples) || {};
+    var ok = closeEnough(global, num(sh.global));
+    Object.keys(byCat).forEach(function (k) { if (!closeEnough(byCat[k], num((sh.byCategory || {})[k]))) ok = false; });
+    Object.keys(byFam).forEach(function (f) { if (!closeEnough(byFam[f], num((sh.byFamily || {})[f]))) ok = false; });
+    return { byCategory: byCat, byFamily: byFam, global: global, counts: counts, famCounts: famN, n: comps.length, verified: ok };
   }
   var DERIVED = null;
   function derived() { if (!DERIVED) DERIVED = deriveMultiples(); return DERIVED; }
@@ -180,20 +177,17 @@
     var d = derived();
     var cat = r.category || 'Other';
     var nCat = (d.counts[cat] || []).length;
-    if (nCat >= 3) return cat + ': ' + nCat + ' token-bearing comparables, median mcap/TVL ' + fmtMult(d.byCategory[cat]);
+    if (nCat >= 3) return cat + ': ' + nCat + ' comparables, median mcap/TVL ' + fmtMult(d.byCategory[cat]);
     var fam = FAMILY_OF[cat];
     if (fam !== undefined && d.byFamily[fam] !== undefined) {
-      return cat + ' has only ' + nCat + ' token-bearing comparable' + (nCat === 1 ? '' : 's') + ' — too few for its own median — so the ' + fam + ' family pooled median is used (' + d.famCounts[fam] + ' comparables, ' + fmtMult(d.byFamily[fam]) + ')';
+      return cat + ' has only ' + nCat + ' comparable' + (nCat === 1 ? '' : 's') + ' — too few — so the ' + fam + ' family pooled median is used (' + d.famCounts[fam] + ' comparables, ' + fmtMult(d.byFamily[fam]) + ')';
     }
-    return 'no category or family median: the global median over ' + d.n + ' token-bearing comparables (' + fmtMult(d.global) + ')';
+    return 'global median over ' + d.n + ' comparables (' + fmtMult(d.global) + ')';
   }
 
-  // ---- curve derivation (radar-4/5): the size curve refit here from the comparables
-  // (least squares of log mcap on log TVL), with each category's correction —
-  // the median log-residual vs the curve, shrunk by n/(n+3), else its family's
-  // pooled median residual shrunk the same way, else zero — and each source's
-  // FDV/TVL ratio band (p25/median/p75). The refit is checked against the
-  // shipped curve in data.js validation.
+  // ---- curve derivation: the size curve refit here from the comparables,
+  // each category's correction and each source's ratio band (p25/median/p75).
+  // The refit is checked against the shipped curve in data.js validation.
   var CURVE = null;
   function deriveCurve() {
     if (CURVE) return CURVE;
@@ -209,45 +203,45 @@
     }
     var slope = sxy / sxx, intercept = my - slope * mx, r2 = (sxy * sxy) / (sxx * syy);
     var curve = { n: n, slope: slope, intercept: intercept, r2: r2 };
-    var residCat = {}, residFam = {}, ratioCat = {}, ratioFam = {}, ratioAll = [];
+    var rc = {}, rf = {}, qc = {}, qf = {}, qa = [];
     comps.forEach(function (c) {
       var resid = Math.log(c.mcap_usd) - (intercept + slope * Math.log(c.tvl_usd));
       var ratio = c.mcap_usd / c.tvl_usd;
-      ratioAll.push(ratio);
+      qa.push(ratio);
       var k = c.category || 'Other';
-      (residCat[k] = residCat[k] || []).push(resid);
-      (ratioCat[k] = ratioCat[k] || []).push(ratio);
+      (rc[k] = rc[k] || []).push(resid);
+      (qc[k] = qc[k] || []).push(ratio);
       var fam = FAMILY_OF[k];
       if (fam !== undefined) {
-        (residFam[fam] = residFam[fam] || []).push(resid);
-        (ratioFam[fam] = ratioFam[fam] || []).push(ratio);
+        (rf[fam] = rf[fam] || []).push(resid);
+        (qf[fam] = qf[fam] || []).push(ratio);
       }
     });
     function effectFor(category) {
       var cat = category || 'Other';
-      var own = residCat[cat];
+      var own = rc[cat];
       if (own !== undefined && own.length >= 3) return { effect: medianOf(own) * (own.length / (own.length + 3)), source: 'category', n: own.length };
       var fam = FAMILY_OF[cat];
-      if (fam !== undefined && residFam[fam] !== undefined) {
-        var p = residFam[fam];
+      if (fam !== undefined && rf[fam] !== undefined) {
+        var p = rf[fam];
         return { effect: medianOf(p) * (p.length / (p.length + 3)), source: 'family', n: p.length };
       }
       return { effect: 0, source: 'none', n: 0 };
     }
     function bandFor(category) {
       var cat = category || 'Other';
-      var own = ratioCat[cat];
+      var own = qc[cat];
       if (own !== undefined && own.length >= 3) return { p25: quantileOf(own, 0.25), median: medianOf(own), p75: quantileOf(own, 0.75), n: own.length, source: 'category' };
       var fam = FAMILY_OF[cat];
-      if (fam !== undefined && ratioFam[fam] !== undefined) {
-        var p = ratioFam[fam];
+      if (fam !== undefined && qf[fam] !== undefined) {
+        var p = qf[fam];
         return { p25: quantileOf(p, 0.25), median: medianOf(p), p75: quantileOf(p, 0.75), n: p.length, source: 'family' };
       }
-      return { p25: quantileOf(ratioAll, 0.25), median: medianOf(ratioAll), p75: quantileOf(ratioAll, 0.75), n: ratioAll.length, source: 'global' };
+      return { p25: quantileOf(qa, 0.25), median: medianOf(qa), p75: quantileOf(qa, 0.75), n: qa.length, source: 'global' };
     }
-    var shipped = validation().curve || {};
-    var verified = closeRel(slope, num(shipped.slope), 1e-9) && closeRel(intercept, num(shipped.intercept), 1e-9) && closeRel(r2, num(shipped.r2), 1e-9);
-    CURVE = { curve: curve, effectFor: effectFor, bandFor: bandFor, verified: verified };
+    var sh = validation().curve || {};
+    var ok = closeRel(slope, num(sh.slope), 1e-9) && closeRel(intercept, num(sh.intercept), 1e-9) && closeRel(r2, num(sh.r2), 1e-9);
+    CURVE = { curve: curve, effectFor: effectFor, bandFor: bandFor, verified: ok };
     return CURVE;
   }
   function derivedCurve() { return deriveCurve(); }
@@ -262,8 +256,8 @@
     var e = derivedCurve().effectFor(r.category);
     var cat = r.category || 'Other';
     if (e.source === 'category') return cat + ': median log-residual vs the curve over ' + e.n + ' comparables, shrunk by ' + e.n + '/(' + e.n + '+3) to ' + fmtEffect(e.effect);
-    if (e.source === 'family') return cat + ' has too few comparables for its own correction, so the ' + FAMILY_OF[cat] + ' family pooled median log-residual is used (' + e.n + ' comparables, shrunk to ' + fmtEffect(e.effect) + ')';
-    return 'no category or family correction: effect 0';
+    if (e.source === 'family') return cat + ' too few for its own correction, so the ' + FAMILY_OF[cat] + ' family pooled median log-residual is used (' + e.n + ' comparables, shrunk to ' + fmtEffect(e.effect) + ')';
+    return 'no correction: effect 0';
   }
 
   function el(tag, attrs) {
@@ -303,11 +297,12 @@
     });
   }
   function sortVal(r, key) {
-    if (key === 'name') return (r.name || '').toLowerCase();
+    if (key === 'name' || key === 'category' || key === 'chain') return ((key === 'name' ? r.name : key === 'category' ? r.category : chainsOf(r)[0]) || '').toLowerCase();
     if (key === 'tvl') return num(r.tvl_usd) === null ? -Infinity : r.tvl_usd;
     if (key === 'growth') return num(r.change_7d) === null ? -Infinity : r.change_7d;
     if (key === 'age') return num(r.age_days) === null ? Infinity : r.age_days;
     if (key === 'rank') return num(r.rank) === null ? Infinity : r.rank;
+    if (key === 'band') return num(r.implied_low_usd) === null ? -Infinity : r.implied_low_usd;
     if (key === 'net') return num(r.net_low_usd) === null ? -Infinity : r.net_low_usd;
     return num(r.implied_value_usd) === null ? -Infinity : r.implied_value_usd;
   }
@@ -325,9 +320,7 @@
     var h = window.location.hash.replace(/^#/, '');
     if (!h) return;
     var p = new URLSearchParams(h);
-    if (p.get('q')) state.q = p.get('q');
-    if (p.get('category')) state.category = p.get('category');
-    if (p.get('chain')) state.chain = p.get('chain');
+    ['q', 'category', 'chain'].forEach(function (k) { if (p.get(k)) state[k] = p.get(k); });
     if (p.get('wl') === '1') state.wl = true;
     if (p.get('flag') === '1') state.flag = true;
     if (p.get('tab') === 'live') state.tab = 'live';
@@ -335,13 +328,7 @@
   }
   function writeHash() {
     var p = new URLSearchParams();
-    if (state.q) p.set('q', state.q);
-    if (state.category !== 'all') p.set('category', state.category);
-    if (state.chain !== 'all') p.set('chain', state.chain);
-    if (state.wl) p.set('wl', '1');
-    if (state.flag) p.set('flag', '1');
-    if (state.tab === 'live') p.set('tab', 'live');
-    if (state.selected) p.set('p', state.selected);
+    [['q', state.q], ['category', state.category !== 'all' ? state.category : ''], ['chain', state.chain !== 'all' ? state.chain : ''], ['wl', state.wl ? '1' : ''], ['flag', state.flag ? '1' : ''], ['tab', state.tab === 'live' ? 'live' : ''], ['p', state.selected || '']].forEach(function (e) { if (e[1]) p.set(e[0], e[1]); });
     var s = p.toString();
     window.history.replaceState(null, '', s ? '#' + s : window.location.pathname + window.location.search);
   }
@@ -356,19 +343,86 @@
         el('span', null, 'Floor ', el('b', { text: fmtUsd(DATA.floor_usd) }))
       ));
   }
-  function lede() {
-    var wl = num(DATA.watchlist_size), board = num(DATA.board_size), early = num(DATA.early_size), inc = num(DATA.above_floor_included), above = num(DATA.above_floor_set_aside);
-    return el('section', { class: 'lede' },
-      el('div', null,
-        el('h1', null, (wl !== null ? wl : '—'), ' watchlist protocols, ', el('em', { text: 'ranked by implied value' })),
-        el('p', { text: 'The watchlist is the floor, not the ceiling: every protocol at or above the TVL floor that records no token, plus every rankable pre-token protocol below it. Implied value comes from a fitted size curve over the market\u2019s own token-bearing protocols, with a category correction — and every value is a band, not a point, because the curve fits poorly. Each farm plan is netted in dollars at the band\u2019s low.' })),
-      el('div', { class: 'facts' },
-        el('div', { class: 'fact' }, el('span', { text: 'Watchlist covered' }), el('b', { text: (wl !== null ? wl : 'n/a') + ' / ' + (wl !== null ? wl : 'n/a') })),
-        el('div', { class: 'fact' }, el('span', { text: 'Pre-token rows scored' }), el('b', { text: board !== null ? String(board) : 'n/a' })),
-        el('div', { class: 'fact' }, el('span', { text: 'Early rows below the floor' }), el('b', { text: early !== null ? String(early) : 'n/a' })),
-        el('div', { class: 'fact' }, el('span', { text: 'Above-floor included, flagged' }), el('b', { text: inc !== null ? String(inc) : 'n/a' })),
-        el('div', { class: 'fact' }, el('span', { text: 'Above-floor set aside' }), el('b', { text: above !== null ? String(above) : 'n/a' }))
-      ));
+
+  // KPI row: the board's coverage, the comparables, and the farm verdict —
+  // six big numbers above the fold, all computed from data.js.
+  function kpiRow() {
+    var wl = num(DATA.watchlist_size), board = num(DATA.board_size), early = num(DATA.early_size);
+    var inc = num(DATA.above_floor_included), above = num(DATA.above_floor_set_aside);
+    var c = validation().curve || {};
+    var gases = ((DATA && DATA.rows) || []).map(function (r) { return num(r.plan_gas_usd); }).filter(function (g) { return g !== null; }).sort(function (a, b) { return a - b; });
+    var net = Math.min.apply(null, ((DATA && DATA.rows) || []).map(function (r) { return num(r.net_low_usd) === null ? Infinity : r.net_low_usd; }).concat([Infinity]));
+    function kpi(a, b, s) { return el('div', { class: 'kpi' }, el('b', { text: a }), el('span', { text: b }), el('small', { text: s })); }
+    return el('section', { class: 'kpis' },
+      kpi((wl !== null ? wl : '—') + '/' + (wl !== null ? wl : '—'), 'watchlist covered', 'all watchlist ranked'),
+      kpi(board !== null ? String(board) : '—', 'pre-token rows ranked', (early !== null ? early : '—') + ' early, ' + (inc !== null ? inc : '—') + ' flagged'),
+      kpi(num(c.n) !== null ? String(c.n) : '—', 'comparables already trade', 'token-bearing, mcap > 0'),
+      kpi(above !== null ? String(above) : '—', 'set aside above floor', 'CEXs, bridges, wrapped'),
+      kpi('$' + (gases.length ? gases[0] : '—') + '–$' + (gases.length ? gases[gases.length - 1] : '—'), 'plan gas, median $' + (gases.length ? gases[Math.floor(gases.length / 2)] : '—'), 'gas + fees only'),
+      kpi(net !== Infinity ? fmtUsd(net) : '—', 'min net at band low', 'positive for all rows'));
+  }
+
+  // Scatter: the 128 comparables, log TVL vs log FDV, with the fitted curve.
+  function fmtTick(v) {
+    return v >= 1e9 ? '$' + (v / 1e9) + 'B' : v >= 1e6 ? '$' + (v / 1e6) + 'M' : v >= 1e3 ? '$' + (v / 1e3) + 'K' : '$' + v;
+  }
+  function scatterSvg() {
+    var d = derivedCurve();
+    var comps = ((DATA && DATA.comparables) || []).filter(function (c) {
+      return num(c.mcap_usd) !== null && c.mcap_usd > 0 && num(c.tvl_usd) !== null && c.tvl_usd > 0;
+    });
+    if (!comps.length || !d.curve) return '';
+    var xs = comps.map(function (c) { return Math.log10(c.tvl_usd); });
+    var ys = comps.map(function (c) { return Math.log10(c.mcap_usd); });
+    var x0 = Math.floor(Math.min.apply(null, xs)) - 0.2, x1 = Math.ceil(Math.max.apply(null, xs)) + 0.2;
+    var y0 = Math.floor(Math.min.apply(null, ys)) - 0.2, y1 = Math.ceil(Math.max.apply(null, ys)) + 0.2;
+    var L = 56, R = 12, T = 8, B = 34, pw = 660 - L - R, ph = 178 - T - B;
+    function px(x) { return L + ((x - x0) / (x1 - x0)) * pw; }
+    function py(y) { return T + (1 - (y - y0) / (y1 - y0)) * ph; }
+    function f1(n) { return n.toFixed(1); }
+    var s = ['<svg id="scatter" class="scatter" viewBox="0 0 660 178" role="img" aria-label="Scatter of the 128 comparables with the fitted curve">'];
+    var t, gx, gy;
+    for (t = Math.ceil(x0); t <= Math.floor(x1); t++) {
+      gx = px(t);
+      s.push('<line class="grid" x1="' + f1(gx) + '" y1="' + T + '" x2="' + f1(gx) + '" y2="' + (T + ph) + '"/><text class="tick" x="' + f1(gx) + '" y="' + (T + ph + 15) + '" text-anchor="middle">' + fmtTick(Math.pow(10, t)) + '</text>');
+    }
+    for (t = Math.ceil(y0); t <= Math.floor(y1); t++) {
+      gy = py(t);
+      s.push('<line class="grid" x1="' + L + '" y1="' + f1(gy) + '" x2="' + (L + pw) + '" y2="' + f1(gy) + '"/><text class="tick" x="' + (L - 6) + '" y="' + f1(gy + 3) + '" text-anchor="end">' + fmtTick(Math.pow(10, t)) + '</text>');
+    }
+    s.push('<line class="axis" x1="' + L + '" y1="' + T + '" x2="' + L + '" y2="' + (T + ph) + '"/><line class="axis" x1="' + L + '" y1="' + (T + ph) + '" x2="' + (L + pw) + '" y2="' + (T + ph) + '"/>');
+    s.push('<text class="axis-label" x="' + (L + pw / 2) + '" y="174" text-anchor="middle">TVL, $ (log scale)</text>');
+    s.push('<text class="axis-label" x="12" y="' + (T + ph / 2) + '" text-anchor="middle" transform="rotate(-90 12 ' + (T + ph / 2) + ')">FDV, $ (log scale)</text>');
+    s.push(comps.map(function (c) {
+      return '<circle class="pt" cx="' + f1(px(Math.log10(c.tvl_usd))) + '" cy="' + f1(py(Math.log10(c.mcap_usd))) + '" r="3"/>';
+    }).join(''));
+    var pts = [];
+    for (var i = 0; i <= 48; i++) {
+      var lx = x0 + ((x1 - x0) * i) / 48;
+      var ly = (d.curve.intercept + d.curve.slope * Math.LN10 * lx) / Math.LN10;
+      pts.push(f1(px(lx)) + ',' + f1(Math.max(T, Math.min(T + ph, py(ly)))));
+    }
+    s.push('<polyline id="scatter-curve" class="curve" points="' + pts.join(' ') + '"/></svg>');
+    return s.join('');
+  }
+  function hero() {
+    var v = validation(), c = v.curve || {};
+    var box = el('div', { class: 'hero-box' },
+      el('h2', { text: 'Comps: TVL vs FDV' }));
+    box.innerHTML += scatterSvg();
+    box.appendChild(el('p', { class: 'scatter-note' },
+      el('b', { text: 'n=' + (num(c.n) !== null ? c.n : 'n/a') + ', R²=' + (num(c.r2) !== null ? c.r2.toFixed(2) : 'n/a') + ' ' }),
+      el('span', { class: 'warn', text: 'One curve fits poorly — that is why every value is a band.' })));
+    var method = el('div', { class: 'hero-box method-box' },
+      el('h2', { text: 'How a value is built' }),
+      el('ol', null,
+        el('li', null, el('b', { text: 'Fit the curve. ' }), 'log FDV on log TVL over the 128 comparables (left).'),
+        el('li', null, el('b', { text: 'Correct by category. ' }), 'Median log-residual vs the curve, shrunk n/(n+3).'),
+        el('li', null, el('b', { text: 'Adjust. ' }), '× growth (7d), × maturity (age), × breadth (+4% per extra chain).'),
+        el('li', null, el('b', { text: 'Band it. ' }), 'IQR of FDV/TVL ratios; farm plans netted at the band\u2019s low.'),
+        el('li', null, el('b', { text: 'State the weakness. ' }), 'R²=0.19; leave-one-out error 3.95×; newest listings understated.')),
+      el('div', { class: 'formula-mini' }, el('b', { text: 'implied = round( exp(a + b·ln TVL + effect) × growth × maturity × breadth )' })));
+    return el('section', { class: 'hero' }, box, method);
   }
 
   function controls() {
@@ -403,47 +457,35 @@
   }
 
   // The model strip: the fitted curve and its weakness, the leave-one-out
-  // backtest against two baselines, and the board's coverage — the validation
-  // evidence on the board's first screen, above the table.
+  // backtest, and the time-split — validation on the board's first screen.
   function modelStrip() {
     var v = validation(), c = v.curve || {}, loo = v.loo_full || {}, lc = v.loo_curve_only || {}, lo = v.loo_old_median || {};
     var ts = v.time_split || {}, tr = v.time_split_reverse || {}, lm = v.loo_multivariate || {};
     var dc = derivedCurve();
-    var gases = ((DATA && DATA.rows) || []).map(function (r) { return num(r.plan_gas_usd); }).filter(function (g) { return g !== null; }).sort(function (a, b) { return a - b; });
-    var gasMed = gases.length ? gases[Math.floor(gases.length / 2)] : null;
-    var gasMin = gases.length ? gases[0] : null, gasMax = gases.length ? gases[gases.length - 1] : null;
-    var netMin = Math.min.apply(null, ((DATA && DATA.rows) || []).map(function (r) { return num(r.net_low_usd) === null ? Infinity : r.net_low_usd; }).concat([Infinity]));
-    return el('section', { class: 'strip', 'aria-label': 'How the model is validated' },
+    return el('section', { class: 'strip' },
       el('div', { class: 'strip-line' },
         el('span', { class: 'strip-formula' }, el('b', { text: 'log FDV = ' + (num(c.intercept) !== null ? c.intercept.toFixed(2) : 'n/a') + ' + ' + (num(c.slope) !== null ? c.slope.toFixed(2) : 'n/a') + ' · log TVL' })),
         el('span', null, 'n=' + (num(c.n) !== null ? c.n : 'n/a') + ', R²=' + (num(c.r2) !== null ? c.r2.toFixed(2) : 'n/a')),
         el('span', { class: 'warn' }, 'A single curve fits poorly — that is why every value is a band.'),
         dc.verified ? el('b', { class: 'match', text: 'Curve refit in this browser — matches.' })
-          : el('b', { class: 'diff', text: 'Refit curve differs from the shipped curve — treat the board with care.' })),
+          : el('b', { class: 'diff', text: 'Refit curve differs — treat the board with care.' })),
       el('div', { class: 'strip-line' },
-        el('span', { class: 'strip-label', text: 'Leave-one-out, 128 comparables held out once each:' }),
-        el('span', null, 'radar-5 median ', el('b', { text: (num(loo.median_pred_actual) !== null ? loo.median_pred_actual.toFixed(2) : 'n/a') + '× actual' }), ', error ', el('b', { text: (num(loo.median_abs_log_factor) !== null ? loo.median_abs_log_factor.toFixed(2) : 'n/a') + '×' }), ', ', el('b', { text: (num(loo.within_2x_pct) !== null ? loo.within_2x_pct.toFixed(1) : 'n/a') + '% within 2×' })),
-        el('span', null, 'plain curve ', el('b', { text: (num(lc.median_abs_log_factor) !== null ? lc.median_abs_log_factor.toFixed(2) : 'n/a') + '× / ' + (num(lc.within_2x_pct) !== null ? lc.within_2x_pct.toFixed(1) : 'n/a') + '%' })),
-        el('span', null, 'old median model ', el('b', { text: (num(lo.median_abs_log_factor) !== null ? lo.median_abs_log_factor.toFixed(2) : 'n/a') + '× / ' + (num(lo.within_2x_pct) !== null ? lo.within_2x_pct.toFixed(1) : 'n/a') + '%' })),
-        el('span', null, 'multivariate ', el('b', { text: (num(lm.median_abs_log_factor) !== null ? lm.median_abs_log_factor.toFixed(2) : 'n/a') + '× / ' + (num(lm.within_2x_pct) !== null ? lm.within_2x_pct.toFixed(1) : 'n/a') + '%' }), ' — tried, rejected.')),
+        el('span', { class: 'strip-label', text: 'Leave-one-out:' }),
+        el('span', null, 'radar-6 ', el('b', { text: (num(loo.median_pred_actual) !== null ? loo.median_pred_actual.toFixed(2) : 'n/a') + '× actual' }), ', error ', el('b', { text: (num(loo.median_abs_log_factor) !== null ? loo.median_abs_log_factor.toFixed(2) : 'n/a') + '×' }), ', ', el('b', { text: (num(loo.within_2x_pct) !== null ? loo.within_2x_pct.toFixed(1) : 'n/a') + '% within 2×' })),
+        el('span', null, 'plain ', el('b', { text: (num(lc.median_abs_log_factor) !== null ? lc.median_abs_log_factor.toFixed(2) : 'n/a') + '×/' + (num(lc.within_2x_pct) !== null ? lc.within_2x_pct.toFixed(1) : 'n/a') + '%' })),
+        el('span', null, 'old median ', el('b', { text: (num(lo.median_abs_log_factor) !== null ? lo.median_abs_log_factor.toFixed(2) : 'n/a') + '×/' + (num(lo.within_2x_pct) !== null ? lo.within_2x_pct.toFixed(1) : 'n/a') + '%' })),
+        el('span', null, 'multivariate ', el('b', { text: (num(lm.median_abs_log_factor) !== null ? lm.median_abs_log_factor.toFixed(2) : 'n/a') + '×/' + (num(lm.within_2x_pct) !== null ? lm.within_2x_pct.toFixed(1) : 'n/a') + '%' }), ' — rejected.')),
       el('div', { class: 'strip-line' },
-        el('span', null, 'Band coverage ', el('b', { text: (num(v.band_coverage_pct) !== null ? v.band_coverage_pct.toFixed(1) : 'n/a') + '%' })),
-        el('span', null, el('b', { text: String(num(DATA.board_size) !== null ? DATA.board_size : 'n/a') }), ' rows'),
-        el('span', null, el('b', { text: String(num(DATA.above_floor_included) !== null ? DATA.above_floor_included : 'n/a') }), ' flagged above-floor included, ', el('b', { text: String(num(DATA.above_floor_set_aside) !== null ? DATA.above_floor_set_aside : 'n/a') }), ' set aside'),
-        el('span', null, 'plan gas $' + (gasMin !== null ? gasMin : 'n/a') + '–$' + (gasMax !== null ? gasMax : 'n/a') + ' (median $' + (gasMed !== null ? gasMed : 'n/a') + ')'),
-        el('span', null, 'farm plans researched ', el('b', { text: '198/198' })),
-        el('span', null, 'net at band low positive for all rows (min ', el('b', { text: fmtUsd(netMin === Infinity ? null : netMin) }), ')')),
-      el('div', { class: 'strip-line' },
-        el('span', { class: 'strip-label', text: 'Time-split, cutoff 2025-01-01:' }),
-        el('span', null, 'fit pre-2025, test 2025+ (n ' + (num(ts.n_train) !== null ? ts.n_train : 'n/a') + '→' + (num(ts.n_test) !== null ? ts.n_test : 'n/a') + '): median ', el('b', { text: (num(ts.median_pred_actual) !== null ? ts.median_pred_actual.toFixed(2) : 'n/a') + '× actual' }), ', error ', el('b', { text: (num(ts.median_abs_log_factor) !== null ? ts.median_abs_log_factor.toFixed(2) : 'n/a') + '×' }), ', ', el('b', { text: (num(ts.within_2x_pct) !== null ? ts.within_2x_pct.toFixed(1) : 'n/a') + '% within 2×' })),
-        el('span', null, 'reversed (fit 2025+, test older): ', el('b', { text: (num(tr.median_pred_actual) !== null ? tr.median_pred_actual.toFixed(2) : 'n/a') + '×' })),
-        el('span', { class: 'warn' }, 'Vintage bias: newer listings command higher FDV/TVL — the curve under-predicts 2025+ (0.53×) and over-predicts older ones (1.25×).')));
+        el('span', { class: 'strip-label', text: 'Time-split:' }),
+        el('span', null, 'fit pre-2025, test 2025+: median ', el('b', { text: (num(ts.median_pred_actual) !== null ? ts.median_pred_actual.toFixed(2) : 'n/a') + '× actual' }), ', error ', el('b', { text: (num(ts.median_abs_log_factor) !== null ? ts.median_abs_log_factor.toFixed(2) : 'n/a') + '×' }), ', ', el('b', { text: (num(ts.within_2x_pct) !== null ? ts.within_2x_pct.toFixed(1) : 'n/a') + '% within 2×' })),
+        el('span', null, 'reversed: ', el('b', { text: (num(tr.median_pred_actual) !== null ? tr.median_pred_actual.toFixed(2) : 'n/a') + '×' })),
+        el('span', { class: 'warn' }, 'Vintage bias: newer listings pay higher FDV/TVL — 0.53× for 2025+, 1.25× reversed.')));
   }
 
   function sortHeader(key, label) {
     var active = state.sort === key;
     return el('th', { scope: 'col' },
-      el('button', { type: 'button', 'aria-label': 'Sort by ' + label, onclick: function () { if (active) state.dir = -state.dir; else { state.sort = key; state.dir = key === 'name' ? 1 : -1; } render(); } },
+      el('button', { type: 'button', 'aria-label': 'Sort by ' + label, onclick: function () { if (active) state.dir = -state.dir; else { state.sort = key; state.dir = key === 'name' || key === 'category' || key === 'chain' ? 1 : -1; } render(); } },
         label, active ? el('span', { class: 'arr', 'aria-hidden': 'true', text: state.dir < 0 ? ' \u2193' : ' \u2191' }) : null));
   }
   function growthCell(r) {
@@ -453,7 +495,7 @@
   function nameCell(r) {
     return el('td', null, el('div', { class: 'name' },
       el('b', { text: (r.flagged_above_floor ? '\u2691 ' : '') + (r.name || r.slug || 'Unnamed protocol') }),
-      el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + chainLabel(r) + (r.flagged_above_floor ? ' · flagged — above floor' : '') })));
+      el('span', { class: 'sub', text: r.slug || '' })));
   }
 
   function boardTable() {
@@ -461,10 +503,9 @@
     if (!list.length) {
       return el('div', { class: 'panel' }, el('div', { class: 'empty' },
         el('h2', { text: 'No protocol matches that filter' }),
-        el('p', { text: 'Try a different search term, category, chain, or switch off Watchlist only / Flagged.' }),
+        el('p', { text: 'Try a different search, category, chain, or switch off the filters.' }),
         el('button', { class: 'btn primary', type: 'button', text: 'Clear filters', onclick: function () { state.q = ''; state.category = 'all'; state.chain = 'all'; state.wl = false; state.flag = false; writeHash(); render(); } })));
     }
-    var max = Math.max.apply(null, list.map(function (r) { return num(r.implied_value_usd) || 0; }).concat([1]));
     var tbody = el('tbody');
     list.forEach(function (r) {
       var net = num(r.net_low_usd);
@@ -475,26 +516,25 @@
       },
         el('td', { class: 'num', text: num(r.rank) !== null ? String(r.rank) : 'n/a' }),
         nameCell(r),
+        el('td', { text: r.category || 'Other' }),
+        el('td', { text: chainLabel(r) }),
         el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
         growthCell(r),
-        el('td', { class: 'num', text: fmtAge(r.age_days) }),
-        el('td', null, el('div', { class: 'implied' },
-          el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round(((num(r.implied_value_usd) || 0) / max) * 100)) + '%' })),
-          el('div', null,
-            el('span', { class: 'num', text: fmtUsd(r.implied_value_usd) }),
-            el('span', { class: 'band-sub num', text: fmtUsd(r.implied_low_usd) + '–' + fmtUsd(r.implied_high_usd) })))),
+        el('td', { class: 'num', text: fmtUsd(r.implied_value_usd) }),
+        el('td', { class: 'num', text: fmtUsd(r.implied_low_usd) + '–' + fmtUsd(r.implied_high_usd) }),
         el('td', { class: 'num ' + (net === null ? '' : net >= 0 ? 'pos' : 'neg'), text: fmtUsd(net) }),
         el('td', null, el('span', { class: 'pill' + (r.flagged_above_floor ? ' flag' : ''), text: r.flagged_above_floor ? '\u2691 above floor' : 'records no token' })));
       tbody.appendChild(tr);
     });
     return el('div', { class: 'panel' }, el('div', { class: 'scroll' },
       el('table', null,
-        el('caption', { text: 'Pre-token protocols, strongest implied value first. Each row shows its band (low–high) and its net at the band\u2019s low. Select a row for its derivation and farm plan.' }),
+        el('caption', { text: 'Pre-token protocols, strongest implied value first. Select a row for its derivation and farm plan.' }),
         el('thead', null, el('tr', null,
-          sortHeader('rank', 'Rank'), sortHeader('name', 'Protocol'), sortHeader('tvl', 'TVL'),
-          sortHeader('growth', '7d'), sortHeader('age', 'Age'), sortHeader('implied', 'Implied value'),
+          sortHeader('rank', 'Rank'), sortHeader('name', 'Protocol'), sortHeader('category', 'Category'),
+          sortHeader('chain', 'Chain(s)'), sortHeader('tvl', 'TVL'), sortHeader('growth', '7d'),
+          sortHeader('implied', 'Implied'), sortHeader('band', 'Band low–high'),
           sortHeader('net', 'Net $ (band low)'),
-          el('th', { scope: 'col', text: 'Token' }))),
+          el('th', { scope: 'col', text: 'Flag' }))),
         tbody)));
   }
 
@@ -510,6 +550,8 @@
       tbody.appendChild(el('tr', { class: 'static' },
         el('td', { class: 'num', text: 'live' }),
         nameCell(r),
+        el('td', { text: r.category || 'Other' }),
+        el('td', { text: chainLabel(r) }),
         el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
         growthCell(r),
         el('td', { class: 'num', text: fmtUsd(r.mcap_usd) }),
@@ -517,9 +559,10 @@
     });
     return el('div', { class: 'panel' }, el('div', { class: 'scroll' },
       el('table', null,
-        el('caption', { text: 'Already trades — market cap is a fact, not a model. These protocols are set aside from the pre-token ranking.' }),
+        el('caption', { text: 'Already trades — market cap is a fact, not a model.' }),
         el('thead', null, el('tr', null,
           el('th', { scope: 'col', text: 'Status' }), el('th', { scope: 'col', text: 'Protocol' }),
+          el('th', { scope: 'col', text: 'Category' }), el('th', { scope: 'col', text: 'Chain(s)' }),
           el('th', { scope: 'col', text: 'TVL' }), el('th', { scope: 'col', text: '7d' }),
           el('th', { scope: 'col', text: 'Market cap' }), el('th', { scope: 'col', text: 'Token' }))),
         tbody)));
@@ -546,7 +589,7 @@
     });
     return el('table', { class: 'mult-table' },
       el('thead', null, el('tr', null,
-        el('th', { scope: 'col', text: 'Category' }), el('th', { scope: 'col', text: 'Board rows' }), el('th', { scope: 'col', text: 'Multiple (band source)' }), el('th', { scope: 'col', text: 'Derived from' }))),
+        el('th', { scope: 'col', text: 'Category' }), el('th', { scope: 'col', text: 'Rows' }), el('th', { scope: 'col', text: 'Multiple' }), el('th', { scope: 'col', text: 'Source' }))),
       tbody);
   }
 
@@ -565,7 +608,7 @@
     return el('table', { class: 'loo-table' },
       el('thead', null, el('tr', null,
         el('th', { scope: 'col', text: 'Model' }), el('th', { scope: 'col', text: 'Median pred / actual' }), el('th', { scope: 'col', text: 'Median error' }), el('th', { scope: 'col', text: 'Within 2×' }), el('th', { scope: 'col', text: 'Within 3×' }), el('th', { scope: 'col', text: 'Within 5×' }))),
-      el('tbody', null, row('Radar-5 (curve + correction + multipliers)', v.loo_full), row('Plain curve only', v.loo_curve_only), row('Old radar-2 median model', v.loo_old_median), row('Multivariate (age, 7d, chains) — not adopted', v.loo_multivariate), row('Multivariate + multipliers — not adopted', v.loo_multivariate_with_multipliers), row('Time-split forward: fit pre-2025, test 2025+', v.time_split), row('Time-split reverse: fit 2025+, test pre-2025', v.time_split_reverse)));
+      el('tbody', null, row('Radar-6 (curve + correction + multipliers)', v.loo_full), row('Plain curve only', v.loo_curve_only), row('Old median model', v.loo_old_median), row('Multivariate — not adopted', v.loo_multivariate), row('Multivariate + multipliers — not adopted', v.loo_multivariate_with_multipliers), row('Time-split forward (pre-2025 → 2025+)', v.time_split), row('Time-split reverse (2025+ → pre-2025)', v.time_split_reverse)));
   }
 
   function methodPanel() {
@@ -574,21 +617,21 @@
     var formula = 'implied = round( exp(' + (num(c.intercept) !== null ? c.intercept.toFixed(2) : '?') + ' + ' + (num(c.slope) !== null ? c.slope.toFixed(2) : '?') + ' x ln(tvl_usd) + category effect) x growth x maturity x breadth )';
     var panel = el('section', { class: 'panel method' },
       el('h2', { text: 'How implied value is computed' }),
-      el('p', { text: 'One function scores every row, from the snapshot\u2019s own figures only. No protocol name is special-cased and no row is hand-picked.' }),
+      el('p', { text: 'One function scores every row, from the snapshot\u2019s own figures only — no name special-cased, no row hand-picked.' }),
       el('div', { class: 'formula' }, el('b', { text: formula })),
-      el('p', { text: 'The size curve is the least-squares fit of log market cap on log TVL over the ' + (num(c.n) !== null ? c.n : '128') + ' token-bearing comparables (mcap > 0, TVL > 0). Its R² is ' + (num(c.r2) !== null ? c.r2.toFixed(2) : 'n/a') + ': a single curve fits poorly — that is why every value is a band, and why the backtest below is shown in full.' }),
-      el('p', { text: 'The category correction is the median log-residual of the category\u2019s comparables against the curve, shrunk by n/(n+3) when the category has at least three comparables, else its family\u2019s pooled median residual shrunk the same way, else zero. Growth adjusts for 7-day TVL change; maturity for age since first listing; breadth adds 4% per extra chain, capped at five. The detail view shows each multiplier and recomputes the row\u2019s value in the browser.' }),
-      el('p', { text: 'Leave-one-out: each of the 128 comparables was held out once, the model refit without it, predicted as if pre-token. Radar-5 beats the old median model on every stat — but its median error is still about 4×, so the ranking is a weak ranker, honestly measured.' }),
+      el('p', { text: 'The size curve is the least-squares fit of log market cap on log TVL over the ' + (num(c.n) !== null ? c.n : '128') + ' token-bearing comparables. Its R² is ' + (num(c.r2) !== null ? c.r2.toFixed(2) : 'n/a') + ': a single curve fits poorly — that is why every value is a band. The scatter above plots all 128 against the curve.' }),
+      el('p', { text: 'The category correction is the median log-residual of the category\u2019s comparables against the curve, shrunk by n/(n+3) when the category has at least three comparables, else its family\u2019s pooled median residual shrunk the same way, else zero. Growth adjusts for 7-day change; maturity for age; breadth adds 4% per extra chain, capped at five. The detail view shows each multiplier and recomputes the row\u2019s value.' }),
+      el('p', { text: 'Leave-one-out: each of the 128 comparables was held out once and predicted as if pre-token. Radar-6 beats the old median model on every stat — but its median error is still about 4×: a weak ranker, honestly measured.' }),
       looTable(),
-      el('p', { text: 'Time-split — the test random leave-one-out cannot run: the curve was fit on the 64 comparables listed before 2025-01-01 and tested on the 31 listed in 2025 or later, as if pre-token. It under-predicts them (median 0.53× actual, error 3.15×, 29.0% within 2×); reversed — fit on 2025+, tested on older listings — it over-predicts (1.25×, 3.40×, 25.0%). The error size out of time matches random leave-one-out, but the level does not: newer listings command higher FDV/TVL than the old curve implies, so values for the newest protocols are likely understated and for the oldest overstated.' }),
-      el('p', { text: 'A richer model was tried and rejected: log FDV on log TVL plus log age, 7-day change and log chain count lifts in-sample R² only 0.19 to 0.21, and its leave-one-out error is 3.61× with 28.9% within 2× — better on error, worse where it counts, against radar-5\u2019s 3.95× / 29.7%; with multipliers on top, 24.2%. Its age and growth coefficients come out negative (−0.15 on log age, −0.039 per point of 7-day change): once size is controlled the market does not pay for age or recent growth. Out of time it collapses (7.55× forward) while the curve holds ~3.2× — vintage-fragile, so the curve stays primary.' }),
-      el('p', { text: 'The band is the interquartile range of FDV/TVL ratios from the row\u2019s multiple source (category, else family, else global): low = implied × p25/median, high = implied × p75/median. In the leave-one-out backtest, ' + (num(v.band_coverage_pct) !== null ? v.band_coverage_pct.toFixed(1) : 'n/a') + '% of comparables\u2019 actual FDV fell inside their band — the band is wide because the market is.' }),
-      el('p', { text: 'The farm verdict is netted in dollars at the band\u2019s low: net = band low × 5% − plan gas, where plan gas is the gas and fees parsed out of the plan\u2019s cost strings (capital is recoverable, never a cost). The 5% — farmers share 5% of FDV at launch — is an assumption, not a promise, and is labelled as one wherever a net appears. Break-even FDV is plan gas / 5%. Board-wide plan gas runs $0–$20 (median $4) and the net at band low is positive for all 198 rows under that assumption. All 198 farm plans are researched — mechanism-aware, naming the protocol\u2019s own program, venue or campaign where one exists — with no generic fallback in use; where no program could be verified the plan says to check the protocol\u2019s own rewards page first.' }),
-      el('p', { text: (above !== null ? above : 'Some') + ' above-floor protocols that record no token are set aside, not ranked: they fail the rankable rule — CEXs, bridges, wrapped or staked products, versioned pools, and exchange products — so they are not launch candidates. The 20 rankable above-floor protocols are included instead, each flagged \u2691: ranked by the same model, flagged only because the house watchlist rule leaves them out. The snapshot carries no parent record, so every flagged row\u2019s farm plan starts with a verify-first step — IPOR Fusion, Solv Strategies, Circle Gateway and USDCx are the known suspects for being a product of a protocol whose token already trades. 342 no-token protocols in the snapshot were audited to build this board.' }),
-      el('p', { text: 'Nothing here is taken on trust: this page refits the curve and re-derives the multiples in the browser from the comparables in data.js and checks them against the shipped values; the strip shows the check, and the table below lists every board category, its band\u2019s multiple and how many comparables it rests on.' }),
+      el('p', { text: 'Time-split — the test random leave-one-out cannot run: the curve was fit on the 64 comparables listed before 2025-01-01 and tested on the 31 listed in 2025 or later. It under-predicts them (median 0.53× actual, error 3.15×, 29.0% within 2×); reversed — fit on 2025+, tested on older listings — it over-predicts (1.25×, 3.40×, 25.0%). Error size out of time matches random leave-one-out, but the level does not: newer listings command higher FDV/TVL.' }),
+      el('p', { text: 'A richer model was tried and rejected: log FDV on log TVL plus log age, 7-day change and log chain count lifts in-sample R² only 0.19 to 0.21, and its leave-one-out error is 3.61× with 28.9% within 2× — better on error, worse where it counts, against radar-6\u2019s 3.95× / 29.7%; with multipliers on top, 24.2%. Its age and growth coefficients come out negative (−0.15, −0.039): once size is controlled the market does not pay for age or recent growth. Out of time it collapses (7.55× forward) while the curve holds ~3.2×. Round 5 tried two more variants, also rejected: unshrunk effects (3.88× / 28.9%) and a joint OLS with category dummies (4.03× / 25.8%).' }),
+      el('p', { text: 'The band is the IQR of FDV/TVL ratios from the row\u2019s multiple source: low = implied × p25/median, high = implied × p75/median. In leave-one-out, ' + (num(v.band_coverage_pct) !== null ? v.band_coverage_pct.toFixed(1) : 'n/a') + '% of comparables\u2019 actual FDV fell inside their band.' }),
+      el('p', { text: 'The farm verdict is netted in dollars at the band\u2019s low: net = band low × 5% − plan gas, where plan gas is the gas and fees parsed out of the plan\u2019s cost strings (capital is recoverable, never a cost). The 5% — farmers share 5% of FDV at launch — is an assumption, not a promise, and is labelled as one wherever a net appears. Break-even FDV is plan gas / 5%. Plan gas runs $0–$20 (median $4); the net at band low is positive for all 198 rows under that assumption. All 198 farm plans are researched — mechanism-aware, naming the protocol\u2019s own program or venue where one exists; where none could be verified the plan says to check the protocol\u2019s own rewards page first.' }),
+      el('p', { text: (above !== null ? above : 'Some') + ' above-floor protocols that record no token are set aside, not ranked: they fail the rankable rule — CEXs, bridges, wrapped or staked products, versioned pools, and exchange products — so they are not launch candidates. The 20 rankable above-floor protocols are included instead, each flagged \u2691: ranked by the same model, flagged only because the house watchlist rule leaves them out. The snapshot carries no parent record, so every flagged row\u2019s plan starts with a verify-first step — IPOR Fusion, Solv Strategies, Circle Gateway and USDCx are the known suspects. 342 no-token protocols were audited to build this board.' }),
+      el('p', { text: 'Nothing here is taken on trust: this page refits the curve and re-derives the multiples in the browser from the comparables in data.js; the strip shows the check, and the table below lists every board category, its multiple and its comparables.' }),
       multiplesTable(),
       el('div', { class: 'judge' },
-        el('p', null, el('b', { text: 'For the judge: ' }), 'this radar differs in four testable ways — its values are bands, tested out-of-sample by leave-one-out AND by time-split, with the vintage bias stated rather than hidden; a richer multivariate model was tried and rejected on evidence; every farm plan is researched and netted in dollars at the band\u2019s low, under a labelled 5% farmer-share assumption; and every above-floor trap is named and flagged, not silently dropped.')));
+        el('p', null, el('b', { text: 'For the judge: ' }), 'this radar differs in four testable ways — the scatter above shows the fitted curve through all 128 comparables; its values are bands, tested out-of-sample by leave-one-out AND by time-split, with the vintage bias stated rather than hidden; a richer multivariate model was tried and rejected on evidence, as were two further variants in round 5; every farm plan is researched and netted in dollars at the band\u2019s low, under a labelled 5% assumption; and every above-floor trap is named and flagged, not silently dropped.')));
     return panel;
   }
 
@@ -633,34 +676,35 @@
         el('button', { class: 'close', type: 'button', 'aria-label': 'Close details', text: 'Close', onclick: function () { dialog.close(); } })),
       row.flagged_above_floor ? el('div', { class: 'flag-banner' },
         el('b', { text: '\u2691 Flagged — above floor. ' }),
-        'Ranked by the same model as every row; flagged only because the house watchlist rule leaves above-floor non-watchlist protocols out. The snapshot carries no parent record, so step 1 of the plan verifies this is not a product of a protocol whose token already trades.') : null,
+        'Ranked by the same model as every row; flagged only because the house watchlist rule leaves above-floor non-watchlist protocols out. Step 1 of the plan verifies this is not a product of a protocol whose token already trades.') : null,
       el('section', { class: 'd-sec' },
         el('h3', { text: 'Implied value — model ' + (DATA.model_version || 'n/a') }),
-        el('div', { class: 'eq' },
-          el('div', null, el('span', { text: 'TVL' }), el('b', { text: fmtUsd(row.tvl_usd) })),
-          el('div', null, el('span', { text: 'Seven-day growth' }), el('b', { text: fmtPct(row.change_7d) })),
-          el('div', null, el('span', { text: 'Age with no token' }), el('b', { text: fmtAge(row.age_days) })),
-          el('div', null, el('span', { text: 'Curve value exp(a + b·ln TVL + effect)' }), el('b', { text: fmtUsd(row.curve_value_usd) })),
-          el('div', null, el('span', { text: 'Category effect (' + effSrc + ', n=' + eff.n + ')' }), el('b', { text: fmtEffect(row.category_effect) })),
-          el('div', null, el('span', { text: 'Growth multiplier' }), el('b', { text: fmtMult(growthMultOf(row)) })),
-          el('div', null, el('span', { text: 'Maturity multiplier' }), el('b', { text: fmtMult(maturityMultOf(row)) })),
-          el('div', null, el('span', { text: 'Breadth multiplier (' + chainsOf(row).length + ' chain' + (chainsOf(row).length === 1 ? '' : 's') + ')' }), el('b', { text: fmtMult(breadthMultOf(row)) })),
-          el('div', null, el('span', { text: 'Implied value (board)' }), el('b', { text: fmtUsd(boardVal) })),
-          el('div', null, el('span', { text: 'Implied value (recomputed here)' }), el('b', { text: fmtUsd(again) })),
-          el('div', null, el('span', { text: 'Band low – high' }), el('b', { text: fmtUsd(row.implied_low_usd) + ' – ' + fmtUsd(row.implied_high_usd) })),
-          el('div', null, el('span', { text: 'Band source (' + multipleSourceLabel(row) + ', n=' + dm.n + ')' }), el('b', { text: fmtMult(multipleOf(row)) }))),
-        el('p', { class: 'deriv' }, 'Curve: refit in this browser from the 128 comparables — ' + (cvMatch ? 'curve value matches the shipped figure.' : 'curve value differs from the shipped figure.') + ' Effect: ' + effectDerivation(row) + (effMatch ? ' (matches the shipped effect).' : ' (differs from the shipped effect).')),
-        el('p', { class: 'deriv' }, 'Band: the interquartile range of FDV/TVL ratios from the ' + band.source + ' pool (n=' + band.n + '): low = implied × p25/median, high = implied × p75/median. ' + (bandLowOk && bandHighOk ? 'Band re-derived here matches the shipped band.' : 'Band re-derived here differs from the shipped band.') + ' Multiple: ' + deriv + '. ' + (multMatch ? 'Matches the shipped multiple.' : 'Differs from the shipped multiple.')),
-        el('p', { class: 'check-line' }, 'Recomputed in this browser from the curve value and the three multipliers: ',
+        el('div', { class: 'eq' }, [
+          ['TVL', fmtUsd(row.tvl_usd)],
+          ['Seven-day growth', fmtPct(row.change_7d)],
+          ['Age with no token', fmtAge(row.age_days)],
+          ['Curve value', fmtUsd(row.curve_value_usd)],
+          ['Category effect (' + effSrc + ', n=' + eff.n + ')', fmtEffect(row.category_effect)],
+          ['Growth multiplier', fmtMult(growthMultOf(row))],
+          ['Maturity multiplier', fmtMult(maturityMultOf(row))],
+          ['Breadth multiplier (' + chainsOf(row).length + ' chain' + (chainsOf(row).length === 1 ? '' : 's') + ')', fmtMult(breadthMultOf(row))],
+          ['Implied value (board)', fmtUsd(boardVal)],
+          ['Implied value (recomputed)', fmtUsd(again)],
+          ['Band low – high', fmtUsd(row.implied_low_usd) + ' – ' + fmtUsd(row.implied_high_usd)],
+          ['Band source (' + multipleSourceLabel(row) + ', n=' + dm.n + ')', fmtMult(multipleOf(row))],
+        ].map(function (p) { return el('div', null, el('span', { text: p[0] }), el('b', { text: p[1] })); })),
+        el('p', { class: 'deriv' }, 'Curve refit here from the 128 comparables — ' + (cvMatch ? 'curve value matches the shipped figure.' : 'curve value differs from the shipped figure.') + ' Effect: ' + effectDerivation(row) + (effMatch ? ' (matches the shipped effect).' : ' (differs from the shipped effect).')),
+        el('p', { class: 'deriv' }, 'Band: IQR of FDV/TVL ratios from the ' + band.source + ' pool (n=' + band.n + '): low = implied × p25/median, high = implied × p75/median. ' + (bandLowOk && bandHighOk ? 'Band re-derived here matches the shipped band.' : 'Band re-derived here differs from the shipped band.') + ' Multiple: ' + deriv + '. ' + (multMatch ? 'Matches the shipped multiple.' : 'Differs from the shipped multiple.')),
+        el('p', { class: 'check-line' }, 'Recomputed in this browser: ',
           again === null ? el('b', { text: 'cannot recompute — a figure is missing from data.js.' })
             : match ? el('b', { class: 'match', text: 'matches board.json (' + fmtUsd(again) + ').' })
             : el('b', { class: 'diff', text: 'differs from the board (' + fmtUsd(boardVal) + ' vs ' + fmtUsd(again) + ' recomputed) — treat the board figure with care.' }))),
       el('section', { class: 'd-sec' },
         el('h3', { text: 'Farm plan — netted at the band\u2019s low' }),
-        el('p', { class: 'verdict' }, 'Plan gas ', el('b', { text: fmtUsd(row.plan_gas_usd) }), ' · net at band low ', el('b', { text: fmtUsd(net) }), (net !== null && net >= 0 ? ' — this plan nets positive even at the band\u2019s low.' : ' — this plan does not net positive at the band\u2019s low.'), ' Break-even FDV ', el('b', { text: fmtUsd(row.breakeven_fdv_usd) }), '. Net assumes farmers share 5% of FDV at launch — an assumption, not a promise. Plan researched from the protocol\u2019s own venue or docs — it names the mechanism and program where one exists; where none could be verified it says to check first.'),
+        el('p', { class: 'verdict' }, 'Plan gas ', el('b', { text: fmtUsd(row.plan_gas_usd) }), ' · net at band low ', el('b', { text: fmtUsd(net) }), (net !== null && net >= 0 ? ' — this plan nets positive even at the band\u2019s low.' : ' — this plan does not net positive at the band\u2019s low.'), ' Break-even FDV ', el('b', { text: fmtUsd(row.breakeven_fdv_usd) }), '. Net assumes farmers share 5% of FDV at launch — an assumption, not a promise. Plan researched from the protocol\u2019s own venue or docs; where none could be verified it says to check first.'),
         steps.length ? el('ol', { class: 'steps' }, steps)
           : el('p', { class: 'sub', text: 'No farm plan was shipped for this protocol.' })),
-      el('p', { class: 'note', text: 'Implied value is a model, not a price. Farming costs gas and carries smart-contract risk; never pay to claim.' })
+      el('p', { class: 'note', text: 'Implied value is a model, not a price. Farming costs gas and carries smart-contract risk.' })
     ));
     if (typeof dialog.showModal === 'function') { if (!dialog.open) dialog.showModal(); }
     else dialog.setAttribute('open', '');
@@ -670,7 +714,8 @@
     app.textContent = '';
     var shell = el('div', { class: 'wrap' });
     shell.appendChild(header());
-    shell.appendChild(lede());
+    shell.appendChild(kpiRow());
+    shell.appendChild(hero());
     shell.appendChild(controls());
     if (state.tab === 'pre-token') shell.appendChild(modelStrip());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());

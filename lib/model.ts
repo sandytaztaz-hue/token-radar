@@ -1,11 +1,9 @@
-// The token radar's model, version radar-5: one snapshot of the protocol universe in, one ranked
-// board out. Radar-5 keeps radar-4's fitted size curve plus category correction as the primary
-// (the multivariate experiment in this file LOO-tests worse on within-2x, so it was NOT adopted
-// — see fitMultivariate / looMultivariate and BUILD_LOG.md), and adds the time-split validation
-// the radar-4 LOO lacked: the curve is fit on protocols listed before 2025-01-01 and tested on
-// protocols listed after, as if pre-token. The fit is weak (R-squared about 0.19) and the
-// dashboard says so; the validation block in data.js carries the leave-one-out backtest, the
-// time-split backtest and the multivariate comparison so the weakness is measured, not hidden.
+// The token radar's model, version radar-6: one snapshot of the protocol universe in, one ranked
+// board out. Radar-6 keeps radar-5's fitted size curve plus category correction as the primary,
+// unchanged: the round-5 model test (see below) tried unshrunk category effects and a joint OLS
+// log(FDV) ~ log(TVL) + category dummies, and NEITHER beat radar-5 on both adoption criteria, so
+// the formula, the board values and the top 10 are identical to radar-5. Radar-6 is a dashboard
+// rework (light theme, KPI row, scatter plot with the fitted curve, denser table) on the same model.
 //
 // Implied value follows only from the snapshot's own figures, never from a hand-written list of names.
 // The size curve is the least-squares fit of log market cap on log TVL over the 128 token-bearing
@@ -90,7 +88,21 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-5';
+export const MODEL_VERSION = 'radar-6';
+
+/**
+ * RADAR-6 MODEL TEST (2026-11-17, scratch harness /tmp/r6_loo.mjs — NOT adopted, kept on
+ * the record here): the harness first reproduced the shipped radar-5 LOO exactly (median
+ * 0.72x, |log| 3.95x, within-2x 29.69%, within-3x 41.41%, within-5x 58.59%), so the
+ * comparison is like-for-like. (a) UNSHRUNK category effects (median log-residual, no
+ * n/(n+3) shrinkage): median 0.79x, |log| 3.88x, within-2x 28.91% — wins on |log| but
+ * LOSES on within-2x, so it fails the adopt-only-if-better-on-BOTH rule. (b) JOINT OLS
+ * log(FDV) ~ log(TVL) + category dummies in one regression (dummies for categories with
+ * n>=3 in the training set, family dummies for thin-category rows only, multipliers on
+ * top exactly as in the full model): median 0.88x, |log| 4.03x, within-2x 25.78% — worse
+ * on both, despite a full-sample R-squared of 0.317 (vs the curve's 0.194): 21 parameters
+ * overfit. The radar-5 model stays primary, exactly as shipped.
+ */
 
 /** The time-split cutoff: protocols listed before it train the curve, protocols listed on or after it are the test set. Chosen as a calendar boundary (2025-01-01) rather than the median listed_at (2024-02-18): the train set is larger (64 vs 47 dated comparables) and "fit on pre-2025 listings, test on 2025+ listings" is the story the judge asked for. The 33 comparables with no listed_at cannot be placed in time and are excluded from both sides. */
 export const TIME_SPLIT_CUTOFF = '2025-01-01';
