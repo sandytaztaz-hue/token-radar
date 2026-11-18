@@ -1,9 +1,11 @@
-// The token radar's model, version radar-6: one snapshot of the protocol universe in, one ranked
-// board out. Radar-6 keeps radar-5's fitted size curve plus category correction as the primary,
-// unchanged: the round-5 model test (see below) tried unshrunk category effects and a joint OLS
-// log(FDV) ~ log(TVL) + category dummies, and NEITHER beat radar-5 on both adoption criteria, so
-// the formula, the board values and the top 10 are identical to radar-5. Radar-6 is a dashboard
-// rework (light theme, KPI row, scatter plot with the fitted curve, denser table) on the same model.
+// The token radar's model, version radar-7: one snapshot of the protocol universe in, one ranked
+// board out. Radar-7 keeps radar-5's fitted size curve plus category correction as the primary,
+// unchanged: the round-7 model test (see below) tried dated-only, recency-weighted, robust,
+// trimmed, category-slope and single-term variants, and NONE of them earned adoption — the
+// closest calls (L1, +change_7d) pass the single-cutoff letter of the rule on noise-level LOO
+// edges and fail the multi-cutoff forward check — so the formula, the board values and the top 10
+// are identical to radar-5/radar-6. Radar-7 ships new validation only: bootstrap rank ranges on
+// every row, a multi-cutoff walk-forward, and the full tested-and-rejected variant record.
 //
 // Implied value follows only from the snapshot's own figures, never from a hand-written list of names.
 // The size curve is the least-squares fit of log market cap on log TVL over the 128 token-bearing
@@ -88,7 +90,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-6';
+export const MODEL_VERSION = 'radar-7';
 
 /**
  * RADAR-6 MODEL TEST (2026-11-17, scratch harness /tmp/r6_loo.mjs — NOT adopted, kept on
@@ -103,6 +105,75 @@ export const MODEL_VERSION = 'radar-6';
  * on both, despite a full-sample R-squared of 0.317 (vs the curve's 0.194): 21 parameters
  * overfit. The radar-5 model stays primary, exactly as shipped.
  */
+
+/**
+ * RADAR-7 MODEL TEST (2026-11-18, scratch harnesses /tmp/r7_loo.mjs, /tmp/r7_check2.mjs,
+ * /tmp/r7_check3.mjs, /tmp/r7_exact.mjs — the LOO/time-split numbers below are recomputed at
+ * runtime by r7ModelVariants, so data.js carries them; the multi-cutoff and paired figures are
+ * the scratch record). The harness first reproduced the shipped radar-5 LOO exactly (median
+ * 0.72x, |log| 3.95x, within-2x 29.69%, within-3x 41.41%, within-5x 58.59%; curve-only 0.93x /
+ * 3.40x / 32.03%; forward 2025-01-01 0.53x / 3.15x / 29.03%), so every comparison is
+ * like-for-like. ADOPTION RULE: a primary-model change is adopted ONLY if it beats r5 on BOTH
+ * median |log| factor AND within-2x in proper LOO, AND does not collapse on time-split forward
+ * (forward |log| within ~10% of r5's 3.15x). "Only if" is a necessary bar, not a mandate: a
+ * win also has to be bigger than noise and consistent across forward cutoffs, or it is not a win.
+ *
+ * (1) DATED-ONLY curve (fit on the 95 dated comparables only): LOO 0.79x / 3.64x / 32.63% /
+ * 48.42% / 61.05% — looks like a win until the pool is held fixed. On the SAME 95 dated rows
+ * the r5 model (trained with the undated comparables included) scores 0.82x / 3.48x / 33.68%,
+ * BETTER than dated-only training (3.64x / 32.63%). The 33 undated comparables are the hard
+ * set (r5 on undated alone: 0.48x / 6.47x / 18.18%); dropping them loses signal, it does not
+ * remove noise. REJECTED. (Leaderboard note: #10's "94 comps" is the dated set minus one; it
+ * does not win.)
+ * (2) RECENCY-WEIGHTED OLS, w = 1/(1+age_years): LOO 0.74x / 3.97x / 32.03%, forward 0.51x /
+ * 3.28x / 25.81%. w = exp(-age_years/2): LOO 0.75x / 3.92x / 32.03%, forward 0.50x / 3.34x /
+ * 22.58%. Both win within-2x but LOSE on |log|. REJECTED.
+ * (3) ROBUST: Huber (2 reweighting iterations, k = 1.345 sigma): LOO 0.75x / 3.89x / 28.91%,
+ * forward 0.55x / 3.14x — wins |log|, loses within-2x. L1 / median regression (IRLS, 10
+ * iterations): LOO 0.73x / 3.90x / 31.25%, forward 0.54x / 3.13x — passes the LETTER of the
+ * rule at the 2025 cutoff, but the edge is noise: exact median |log| 3.8998 vs r5 3.9506 (1.3%),
+ * within-2x 40 vs 38 rows, paired LOO 71 better / 57 worse, the Huber sibling in the same
+ * family FAILS within-2x, and multi-cutoff forward is mixed (L1 3.73x vs r5 3.42x at
+ * 2024-01-01; 4.15x vs 4.25x at 2024-07-01; reverse 3.56x vs 3.40x at 2025-01-01). REJECTED.
+ * (4) TRIMMED OLS (drop |residual| beyond 2x median |residual|, one pass, refit; keeps
+ * 104/128, slope 0.5368, intercept 6.8732): LOO 0.77x / 3.94x / 30.47%, forward 0.58x / 3.27x
+ * / 25.81%. The |log| edge is 0.3% (exact 3.9387 vs 3.9506) and +1 row within-2x: noise.
+ * REJECTED.
+ * (5) CATEGORY-SPECIFIC SLOPES for categories with n>=10 (own OLS per big category, global
+ * curve + shrunk effect elsewhere; only Lending 15 and Dexs 11 qualify): LOO 0.75x / 4.10x /
+ * 27.34%, forward 0.53x / 3.15x. Loses on both. REJECTED.
+ * (6) SINGLE-TERM additions (regression + shrunk category effect, NO multipliers — the term
+ * absorbs what the multiplier did; with-multipliers variants all lose on |log|, 4.00x-4.10x):
+ * +log(ageDays): LOO 0.86x / 3.91x / 31.25%, forward COLLAPSES 0.13x / 7.84x / 19.35%.
+ * +change_7d: LOO 1.00x / 3.69x / 32.81% (exact |log| 3.6892, +4 rows) — the best LOO of the
+ * single terms, and forward 2025 passes (0.64x / 3.16x / 32.26%), BUT multi-cutoff forward
+ * fails: 3.92x vs r5 3.42x at 2024-01-01, 4.58x vs 4.25x at 2024-07-01, reverse 4.20x vs
+ * 3.40x at 2025-01-01. The LOO win does not travel forward. +log(chains): LOO 0.84x / 3.90x /
+ * 32.03%, forward 0.63x / 4.02x (+28%). +listed year: LOO 0.88x / 3.89x / 33.59%, forward
+ * 0.34x / 3.44x with within-2x collapsing to 19.35%. Full-sample single-term coefficients:
+ * logAge -0.1019, change_7d -0.0371, logChains +0.0819, listedYear +0.0809 (on log FDV);
+ * the change_7d coefficient is sign-stable across vintages (-0.0248 pre-2025, -0.0346 post-2025)
+ * but the TVL slope itself is vintage-unstable (0.58 pre-2025 vs 0.16 post-2025), which is why
+ * the forward splits disagree. ALL REJECTED.
+ * (8) MULTI-CUTOFF WALK-FORWARD (r5, shipped as validation.walk_forward): forward 2024-01-01
+ * 0.77x / 3.42x / 35.29% (44->51), 2024-07-01 1.11x / 4.25x / 32.56% (52->43), 2025-01-01 0.53x
+ * / 3.15x / 29.03% (64->31); reverse 2024-07-01 0.70x / 3.45x / 32.69% (43->52). The vintage
+ * bias is the standing story: fit pre-2025 under-predicts 2025+ (0.53x), fit 2025+ over-predicts
+ * older (1.25x at the 2025 cutoff).
+ * (9) FARM/THIN/SKIP: no honest rule discriminates. All 198 net_low_usd are positive (min
+ * $12,724, median $73,472.50, max $1,018,194); plan gas is $0-$20 everywhere, so breakeven FDV is
+ * at most $400. A $50K net_low cut would label 139 rows farm / 59 thin, but net_low is nearly
+ * monotonic in implied value (5% of the band low minus trivial gas), so the cut would just
+ * relabel the top 70% by value with no economic content — the bottom row still nets $12.7K at
+ * band low. No rule shipped; validation.farm_rule records the verdict and the distribution.
+ */
+
+/** Bootstrap rank ranges: refits of the kept model over resampled comparables. */
+export const R7_BOOTSTRAP_REFITS = 200;
+/** Fixed seed for the bootstrap: main.ts run twice must be byte-identical. */
+export const R7_BOOTSTRAP_SEED = 20261118;
+/** Walk-forward cutoffs: the forward splits, plus the reverse split at the middle cutoff. */
+export const R7_WALK_FORWARD_CUTOFFS = ['2024-01-01', '2024-07-01', '2025-01-01'];
 
 /** The time-split cutoff: protocols listed before it train the curve, protocols listed on or after it are the test set. Chosen as a calendar boundary (2025-01-01) rather than the median listed_at (2024-02-18): the train set is larger (64 vs 47 dated comparables) and "fit on pre-2025 listings, test on 2025+ listings" is the story the judge asked for. The 33 comparables with no listed_at cannot be placed in time and are excluded from both sides. */
 export const TIME_SPLIT_CUTOFF = '2025-01-01';
@@ -149,6 +220,13 @@ export interface BoardRow {
   net_low_usd: number;
   /** Launch FDV at which the farm breaks even: round(plan_gas_usd / FARMER_SHARE). */
   breakeven_fdv_usd: number;
+  /** Bootstrap rank range (radar-7): the p5/p95 rank over 200 refits of the kept model on
+   * comparables resampled with replacement (fixed seed). rank_low <= rank <= rank_high. */
+  rank_low: number;
+  rank_high: number;
+  /** Bootstrap implied-value range (radar-7): the p5/p95 implied value over the same 200 refits. */
+  implied_low_boot_usd: number;
+  implied_high_boot_usd: number;
   /** True when the row is a rankable pre-token protocol above the watchlist floor that is not on the watchlist: included in radar-4, with a verification step prepended to its farm plan. */
   flagged_above_floor: boolean;
   model: {
@@ -187,6 +265,13 @@ export interface RadarRow {
   net_low_usd: number;
   breakeven_fdv_usd: number;
   flagged_above_floor: boolean;
+  /** Bootstrap rank range (radar-7): the p5/p95 rank over 200 refits of the kept model on
+   * comparables resampled with replacement (fixed seed). rank_low <= rank <= rank_high. */
+  rank_low: number;
+  rank_high: number;
+  /** Bootstrap implied-value range (radar-7): the p5/p95 implied value over the same 200 refits. */
+  implied_low_boot_usd: number;
+  implied_high_boot_usd: number;
   multiple: number;
   multiple_source: string;
   curve_value_usd: number;
@@ -282,6 +367,61 @@ export interface MultivariateFit {
   coef_log_chains: number;
 }
 
+/** One walk-forward split (radar-7): the kept model fit on one side of a listing-date cutoff and tested on the other. `direction` forward fits earlier listings and tests later ones; reverse swaps the sides. */
+export interface WalkForwardEntry extends TimeSplitStats {
+  direction: 'forward' | 'reverse';
+}
+
+/** One tested model variant's LOO numbers (radar-7). within_3x_pct / within_5x_pct are null
+ * only for record-only variants whose earlier round did not log them (the joint OLS). */
+export interface ModelVariantLoo {
+  median_pred_actual: number;
+  median_abs_log_factor: number;
+  within_2x_pct: number;
+  within_3x_pct: number | null;
+  within_5x_pct: number | null;
+}
+
+/** One tested model variant (radar-7): its LOO and 2025-01-01 forward numbers, whether it was
+ * adopted as the primary model, and why. time_split_forward is null for record-only variants
+ * whose earlier round did not run a forward split. */
+export interface ModelVariant {
+  id: string;
+  label: string;
+  loo: ModelVariantLoo;
+  time_split_forward: TimeSplitStats | null;
+  adopted: boolean;
+  reason: string;
+}
+
+/** The bootstrap summary (radar-7): rank-range widths over the 200 refits. Widths are
+ * rank_high - rank_low; the median and p90 are over all 198 rows. */
+export interface BootstrapSummary {
+  refits: number;
+  seed: number;
+  median_rank_width: number;
+  p90_rank_width: number;
+  top10_median_rank_width: number;
+  top10_max_rank_width: number;
+}
+
+/** The farm/thin/skip verdict (radar-7). `verdict` is 'no-discriminating-rule' when no honest
+ * threshold separates the rows: every row nets positive at band low and gas is trivial, so any
+ * cut would only relabel the board by implied value. `rule` carries the rule text when one is
+ * adopted, else null. */
+export interface FarmRuleAssessment {
+  verdict: 'no-discriminating-rule' | 'farm-thin-skip';
+  rule: string | null;
+  net_low_min_usd: number;
+  net_low_median_usd: number;
+  net_low_max_usd: number;
+  rows_net_low_at_least_50k: number;
+  rows_net_low_below_50k: number;
+  rows_net_low_at_most_0: number;
+  plan_gas_max_usd: number;
+  reason: string;
+}
+
 /** The validation block shipped in data.js: the fit, the LOO backtest of the full model and of two baselines, and the band coverage. All computed at runtime from the snapshot. */
 export interface Validation {
   curve: SizeCurve;
@@ -301,6 +441,18 @@ export interface Validation {
   multivariate_fit: MultivariateFit;
   /** STATED ASSUMPTION (see FARMER_SHARE): the farmer share of launch FDV behind net_low_usd and breakeven_fdv_usd. */
   farmer_share_assumption: number;
+  /** The multi-cutoff walk-forward (radar-7): forward splits at 2024-01-01, 2024-07-01 and
+   * 2025-01-01, plus the reverse split at 2024-07-01. */
+  walk_forward: WalkForwardEntry[];
+  /** Every model variant tested in radar-7 (computed at runtime) plus the radar-5/radar-6
+   * record-only variants, each with its LOO + forward numbers and its adopted/rejected reason. */
+  model_variants: ModelVariant[];
+  /** The bootstrap summary (radar-7); the per-row ranges live on each row (rank_low,
+   * rank_high, implied_low_boot_usd, implied_high_boot_usd). */
+  bootstrap: BootstrapSummary;
+  /** The farm/thin/skip verdict (radar-7): no honest rule discriminates, with the distribution
+   * behind that verdict. */
+  farm_rule: FarmRuleAssessment;
 }
 
 /** Everything the dashboard needs: the board, the live set, the multiples, and the model it runs. */
@@ -775,6 +927,276 @@ export function looMultivariate(snapshot: Snapshot): {
   };
 }
 
+/**
+ * RADAR-7 VARIANT ENGINE. Every function in this block is new in radar-7: a small, generic
+ * harness for testing primary-model variants with a PROPER leave-one-out (each held-out
+ * comparable is refit without it — the curve, the category effects and any extra regressor are
+ * all refit on the training set alone) and a forward time-split. Nothing here changes the
+ * shipped board: the kept model is still buildFit + multipliers, and these predictors exist only
+ * so r7ModelVariants can score the alternatives at runtime and record them in data.js.
+ */
+
+/** A variant's prediction for one comparable, in USD (multipliers included unless the variant
+ * replaces them, as the single-term regressions do). */
+export type R7Predictor = (c: Comparable) => number;
+/** A variant's factory: a training set of comparables in, a predictor out. */
+export type R7PredictorFactory = (train: Comparable[]) => R7Predictor;
+
+/** A deterministic PRNG (mulberry32): the bootstrap resamples with this, never Math.random, so
+ * two runs of main.ts agree byte for byte. */
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * The shrunk median log-residual category correction against an ARBITRARY log-predictor (not
+ * just buildFit's curve): the median residual of the category's training comparables, shrunk
+ * by n/(n+3) when n >= 3, else the pooled median residual of its family shrunk the same way,
+ * else zero. `shrink` false gives the unshrunk variant (radar-6's rejected (a)).
+ */
+export function r7EffectFor(train: Comparable[], logPred: (c: Comparable) => number, shrink: boolean): (category: string | null) => number {
+  const residByCategory = new Map<string, number[]>();
+  const residByFamily = new Map<string, number[]>();
+  for (const c of train) {
+    const residual = Math.log(c.mcap_usd) - logPred(c);
+    if (c.category === null) continue;
+    const rc = residByCategory.get(c.category) ?? [];
+    rc.push(residual);
+    residByCategory.set(c.category, rc);
+    const family = FAMILY_OF[c.category];
+    if (family === undefined) continue;
+    const rf = residByFamily.get(family) ?? [];
+    rf.push(residual);
+    residByFamily.set(family, rf);
+  }
+  return (category: string | null): number => {
+    if (category !== null) {
+      const own = residByCategory.get(category);
+      if (own !== undefined && own.length >= 3) return median(own) * (shrink ? own.length / (own.length + 3) : 1);
+      const family = FAMILY_OF[category];
+      if (family !== undefined) {
+        const pooled = residByFamily.get(family);
+        if (pooled !== undefined && pooled.length >= 1) return median(pooled) * (shrink ? pooled.length / (pooled.length + 3) : 1);
+      }
+    }
+    return 0;
+  };
+}
+
+/**
+ * The least-squares fit of log market cap on log TVL over one training set, with optional
+ * per-comparable weights (null = plain OLS). Weighted means, weighted slope: the same two
+ * passes as fitCurve, with each comparable's contribution scaled by its weight.
+ */
+export function r7FitCurveWeighted(train: Comparable[], weights: number[] | null): { slope: number; intercept: number } {
+  let sw = 0;
+  let sx = 0;
+  let sy = 0;
+  for (let i = 0; i < train.length; i++) {
+    const w = weights === null ? 1 : weights[i]!;
+    sw += w;
+    sx += w * Math.log(train[i]!.tvl_usd);
+    sy += w * Math.log(train[i]!.mcap_usd);
+  }
+  const mx = sx / sw;
+  const my = sy / sw;
+  let sxy = 0;
+  let sxx = 0;
+  for (let i = 0; i < train.length; i++) {
+    const w = weights === null ? 1 : weights[i]!;
+    const dx = Math.log(train[i]!.tvl_usd) - mx;
+    const dy = Math.log(train[i]!.mcap_usd) - my;
+    sxy += w * dx * dy;
+    sxx += w * dx * dx;
+  }
+  const slope = sxy / sxx;
+  return { slope, intercept: my - slope * mx };
+}
+
+/** One comparable's age in years from its listing date (listed_at null -> 365 days, the same fallback the maturity multiplier uses). */
+export function r7AgeYears(snapshot: Snapshot, protocol: SnapshotProtocol): number {
+  return (ageDays(snapshot.as_of, protocol.listed_at) ?? MODEL.unknown_age_days) / 365;
+}
+
+/** The growth x maturity x breadth multiplier product one protocol gets under the kept model. */
+export function r7MultProduct(snapshot: Snapshot, protocol: SnapshotProtocol): number {
+  const m = multipliers(protocol, snapshot.as_of, MODEL);
+  return m.growthMult * m.maturityMult * m.breadthMult;
+}
+
+/**
+ * The Huber-robust curve: plain OLS, then two reweighting iterations. Residuals are centred on
+ * their median; the scale is 1.4826 x the median absolute deviation, the Huber cutoff is
+ * 1.345 x that scale, and a comparable beyond the cutoff is down-weighted to k/|residual|.
+ * Two iterations, exactly as the scratch harness ran them.
+ */
+export function r7HuberCurve(train: Comparable[]): { slope: number; intercept: number } {
+  let weights = train.map(() => 1);
+  let curve = r7FitCurveWeighted(train, weights);
+  for (let iter = 0; iter < 2; iter++) {
+    const residuals = train.map((c) => Math.log(c.mcap_usd) - (curve.intercept + curve.slope * Math.log(c.tvl_usd)));
+    const centre = median(residuals);
+    const sigma = 1.4826 * median(residuals.map((r) => Math.abs(r - centre))) || 1;
+    const k = 1.345 * sigma;
+    weights = residuals.map((r) => {
+      const a = Math.abs(r - centre);
+      return a <= k ? 1 : k / a;
+    });
+    curve = r7FitCurveWeighted(train, weights);
+  }
+  return curve;
+}
+
+/**
+ * The L1 / median-regression curve by iteratively reweighted least squares: each iteration
+ * weights a comparable by 1/max(|residual|, 0.1), refits, and stops when the slope and
+ * intercept both move less than 1e-9 (at most 10 iterations). The 0.1 floor keeps a
+ * near-perfect fit from taking an unbounded weight.
+ */
+export function r7L1Curve(train: Comparable[]): { slope: number; intercept: number } {
+  let weights = train.map(() => 1);
+  let curve = r7FitCurveWeighted(train, weights);
+  for (let iter = 0; iter < 10; iter++) {
+    const residuals = train.map((c) => Math.log(c.mcap_usd) - (curve.intercept + curve.slope * Math.log(c.tvl_usd)));
+    weights = residuals.map((r) => 1 / Math.max(Math.abs(r), 0.1));
+    const next = r7FitCurveWeighted(train, weights);
+    if (Math.abs(next.slope - curve.slope) < 1e-9 && Math.abs(next.intercept - curve.intercept) < 1e-9) {
+      curve = next;
+      break;
+    }
+    curve = next;
+  }
+  return curve;
+}
+
+/**
+ * The trimmed curve: plain OLS, drop the comparables whose |log-residual| exceeds twice the
+ * median |log-residual| (one pass), refit on what is kept. On the full 128 that keeps 104.
+ */
+export function r7TrimmedCurve(train: Comparable[]): { slope: number; intercept: number } {
+  const first = r7FitCurveWeighted(train, null);
+  const residuals = train.map((c) => Math.log(c.mcap_usd) - (first.intercept + first.slope * Math.log(c.tvl_usd)));
+  const threshold = 2 * median(residuals.map((r) => Math.abs(r)));
+  return r7FitCurveWeighted(
+    train.filter((_, i) => Math.abs(residuals[i]!) <= threshold),
+    null,
+  );
+}
+
+/**
+ * A curve + shrunk-effect + multipliers predictor factory from any curve builder: the
+ * variant's curve, the shrunk median-residual correction against it, then the kept model's
+ * growth/maturity/breadth multipliers. The plain factory (curveOf = buildFit's curve) IS the
+ * kept model, so the dated-only variant and the forward splits run through this same path.
+ */
+export function r7CurveFactory(
+  snapshot: Snapshot,
+  curveOf: (train: Comparable[]) => { slope: number; intercept: number },
+  shrink = true,
+): R7PredictorFactory {
+  const bySlug = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  return (train) => {
+    const curve = curveOf(train);
+    const effect = r7EffectFor(train, (c) => curve.intercept + curve.slope * Math.log(c.tvl_usd), shrink);
+    return (c) => Math.exp(curve.intercept + curve.slope * Math.log(c.tvl_usd) + effect(c.category)) * r7MultProduct(snapshot, bySlug.get(c.slug)!);
+  };
+}
+
+/** A recency-weighted curve factory: weights are a function of the comparable's own age. */
+export function r7WeightedCurveFactory(snapshot: Snapshot, weight: (snapshot: Snapshot, protocol: SnapshotProtocol) => number): R7PredictorFactory {
+  const bySlug = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  return (train) => {
+    const curve = r7FitCurveWeighted(
+      train,
+      train.map((c) => weight(snapshot, bySlug.get(c.slug)!)),
+    );
+    const effect = r7EffectFor(train, (c) => curve.intercept + curve.slope * Math.log(c.tvl_usd), true);
+    return (c) => Math.exp(curve.intercept + curve.slope * Math.log(c.tvl_usd) + effect(c.category)) * r7MultProduct(snapshot, bySlug.get(c.slug)!);
+  };
+}
+
+/**
+ * The category-slope factory: categories with at least 10 training comparables get their OWN
+ * OLS curve (own slope and intercept, no category effect — the own curve absorbs the level);
+ * every other row falls back to the global curve plus the shrunk category effect. On the full
+ * 128 only Lending (15) and Dexs (11) qualify.
+ */
+export function r7CatSlopeFactory(snapshot: Snapshot): R7PredictorFactory {
+  const bySlug = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  return (train) => {
+    const global = r7FitCurveWeighted(train, null);
+    const effect = r7EffectFor(train, (c) => global.intercept + global.slope * Math.log(c.tvl_usd), true);
+    const counts = new Map<string, number>();
+    for (const c of train) if (c.category !== null) counts.set(c.category, (counts.get(c.category) ?? 0) + 1);
+    const own = new Map<string, { slope: number; intercept: number }>();
+    for (const [category, n] of counts) {
+      if (n >= 10) own.set(category, r7FitCurveWeighted(train.filter((c) => c.category === category), null));
+    }
+    return (c) => {
+      const o = c.category !== null ? own.get(c.category) : undefined;
+      if (o !== undefined) return Math.exp(o.intercept + o.slope * Math.log(c.tvl_usd)) * r7MultProduct(snapshot, bySlug.get(c.slug)!);
+      return Math.exp(global.intercept + global.slope * Math.log(c.tvl_usd) + effect(c.category)) * r7MultProduct(snapshot, bySlug.get(c.slug)!);
+    };
+  };
+}
+
+/** The four single extra terms the radar-7 test adds to log(FDV) ~ log(TVL), one at a time. */
+export type R7SingleTermKind = 'logAge' | 'change7d' | 'logChains' | 'listedYear';
+
+/**
+ * One protocol's value of a single extra term. Age unknown (listed_at null) is 365 days, the
+ * same fallback the maturity multiplier uses; change_7d null is 0; chains counts the array's
+ * length floored at 1; listed year unknown is the as-of year minus one (the 365-day fallback
+ * listing sits in the previous calendar year).
+ */
+export function r7SingleTermValue(protocol: SnapshotProtocol, asOf: string, kind: R7SingleTermKind): number {
+  switch (kind) {
+    case 'logAge': {
+      const age = ageDays(asOf, protocol.listed_at) ?? MODEL.unknown_age_days;
+      return Math.log(Math.max(age, 1));
+    }
+    case 'change7d':
+      return finite(protocol.change_7d, 0);
+    case 'logChains':
+      return Math.log(Math.max(protocol.chains.length, 1));
+    case 'listedYear': {
+      if (protocol.listed_at !== null) return parseInt(protocol.listed_at.slice(0, 4), 10);
+      const age = ageDays(asOf, protocol.listed_at) ?? MODEL.unknown_age_days;
+      return parseInt(asOf.slice(0, 4), 10) - Math.floor(age / 365);
+    }
+  }
+}
+
+/**
+ * The single-term factory: least squares of log market cap on [1, ln(TVL), term], plus the
+ * shrunk median-residual category correction against the regression — and NO multipliers.
+ * The term already absorbs what the multiplier did (age, 7d change, chain count), so applying
+ * the multipliers on top would double-count; the with-multipliers variants were run in the
+ * scratch harness and all lose on |log| (4.00x-4.10x).
+ */
+export function r7SingleTermFactory(snapshot: Snapshot, kind: R7SingleTermKind): R7PredictorFactory {
+  const bySlug = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  return (train) => {
+    const rows = train.map((c) => [1, Math.log(c.tvl_usd), r7SingleTermValue(bySlug.get(c.slug)!, snapshot.as_of, kind)]);
+    const y = train.map((c) => Math.log(c.mcap_usd));
+    const beta = olsSolve(rows, y);
+    const effect = r7EffectFor(
+      train,
+      (c) => beta[0]! + beta[1]! * Math.log(c.tvl_usd) + beta[2]! * r7SingleTermValue(bySlug.get(c.slug)!, snapshot.as_of, kind),
+      true,
+    );
+    return (c) =>
+      Math.exp(beta[0]! + beta[1]! * Math.log(c.tvl_usd) + beta[2]! * r7SingleTermValue(bySlug.get(c.slug)!, snapshot.as_of, kind) + effect(c.category));
+  };
+}
+
 /** The radar-2 multiple one category scores with, from one training set: its own median (n>=3), else its family's pooled median, else the global median. */
 function multipleForTrain(category: string | null, train: Comparable[]): number {
   const ratio = (c: Comparable): number => c.mcap_usd / c.tvl_usd;
@@ -1022,6 +1444,13 @@ export function buildBoard(
       plan_gas_usd: s.planGas,
       net_low_usd: s.netLow,
       breakeven_fdv_usd: s.breakeven,
+      // Radar-7 bootstrap ranges default to the point values here: buildBoard alone does not
+      // resample. buildRadar overwrites them with the 200-refit p5/p95 ranges before the
+      // dashboard rows are mapped, so a directly built board still carries sane fields.
+      rank_low: i + 1,
+      rank_high: i + 1,
+      implied_low_boot_usd: s.impliedLow,
+      implied_high_boot_usd: s.impliedHigh,
       flagged_above_floor: s.flagged,
       model: {
         multiple: s.multiple,
@@ -1173,6 +1602,10 @@ export function radarRow(row: BoardRow): RadarRow {
     net_low_usd: row.net_low_usd,
     breakeven_fdv_usd: row.breakeven_fdv_usd,
     flagged_above_floor: row.flagged_above_floor,
+    rank_low: row.rank_low,
+    rank_high: row.rank_high,
+    implied_low_boot_usd: row.implied_low_boot_usd,
+    implied_high_boot_usd: row.implied_high_boot_usd,
     multiple: row.model.multiple,
     multiple_source: row.model.multiple_source,
     curve_value_usd: row.model.curve_value_usd,
@@ -1182,6 +1615,318 @@ export function radarRow(row: BoardRow): RadarRow {
     maturity_multiplier: row.model.maturity_multiplier,
     breadth_multiplier: row.model.breadth_multiplier,
     farm_steps: row.farm_steps,
+  };
+}
+
+/**
+ * The leave-one-out backtest for ANY variant factory over ANY pool: each held-out comparable
+ * is predicted by a factory refit on the pool without it. The dated-only variant runs this
+ * over the 95 dated comparables; every other variant runs it over all 128.
+ */
+export function r7Loo(snapshot: Snapshot, pool: Comparable[], factory: R7PredictorFactory): LooStats {
+  void snapshot;
+  const ratios = pool.map((held) => factory(pool.filter((c) => c.slug !== held.slug))(held) / held.mcap_usd);
+  return looSummary(ratios);
+}
+
+/**
+ * The time-split backtest for ANY variant factory: fit on the comparables listed before
+ * `cutoff`, test on those listed on or after it (reverse swaps the sides). Comparables with no
+ * listed_at are in neither side. The plain factory through this driver reproduces
+ * timeSplitBacktest exactly.
+ */
+export function r7TimeSplit(snapshot: Snapshot, factory: R7PredictorFactory, cutoff: string, reverse = false): TimeSplitStats {
+  const bySlug = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  const dated = comparablesOf(snapshot).filter((c) => bySlug.get(c.slug)!.listed_at !== null);
+  const earlier = dated.filter((c) => bySlug.get(c.slug)!.listed_at! < cutoff);
+  const later = dated.filter((c) => bySlug.get(c.slug)!.listed_at! >= cutoff);
+  const train = reverse ? later : earlier;
+  const test = reverse ? earlier : later;
+  const predict = factory(train);
+  const ratios = test.map((c) => predict(c) / c.mcap_usd);
+  return { cutoff, n_train: train.length, n_test: test.length, ...looSummary(ratios) };
+}
+
+/** One variant record from its LOO and forward numbers, with its verdict. */
+function r7VariantEntry(
+  id: string,
+  label: string,
+  loo: LooStats,
+  forward: TimeSplitStats | null,
+  adopted: boolean,
+  reason: string,
+): ModelVariant {
+  return {
+    id,
+    label,
+    loo: {
+      median_pred_actual: loo.median_pred_actual,
+      median_abs_log_factor: loo.median_abs_log_factor,
+      within_2x_pct: loo.within_2x_pct,
+      within_3x_pct: loo.within_3x_pct,
+      within_5x_pct: loo.within_5x_pct,
+    },
+    time_split_forward: forward,
+    adopted,
+    reason,
+  };
+}
+
+/**
+ * Every radar-7 model variant, scored at runtime: LOO over the proper pool plus the forward
+ * split at 2025-01-01, each with its adopted/rejected verdict. The two record-only entries
+ * (joint OLS, multivariate) reuse numbers the earlier rounds logged: the joint OLS was never
+ * re-run because its dummy design is not reconstructable from the round-6 note alone, and the
+ * multivariate numbers come from looMultivariate, computed just above in buildRadar. NONE of
+ * the variants is adopted: the kept model stays the radar-5 curve + shrunk effect +
+ * multipliers, exactly as shipped.
+ */
+export function r7ModelVariants(
+  snapshot: Snapshot,
+  multivariate: { alone: LooStats; with_multipliers: LooStats },
+): ModelVariant[] {
+  const comparables = comparablesOf(snapshot);
+  const bySlug = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  const dated = comparables.filter((c) => bySlug.get(c.slug)!.listed_at !== null);
+  const plain = r7CurveFactory(snapshot, (train) => buildFit(train).curve);
+  const forwardOf = (factory: R7PredictorFactory): TimeSplitStats => r7TimeSplit(snapshot, factory, TIME_SPLIT_CUTOFF, false);
+  const variants: ModelVariant[] = [];
+  variants.push(
+    r7VariantEntry(
+      'dated-only',
+      'Dated-only curve (95 dated comparables)',
+      r7Loo(snapshot, dated, plain),
+      forwardOf(plain),
+      false,
+      'REJECTED — the 95-row LOO (3.64x) looks better than r5\'s 128-row LOO (3.95x) only because the pool differs: on the same 95 dated rows r5 scores 3.48x / 33.68%, better than dated-only training (3.64x / 32.63%). The 33 undated comparables are the hard set (6.47x); dropping them loses signal.',
+    ),
+  );
+  variants.push(
+    r7VariantEntry(
+      'recency-1-over-1-plus-age',
+      'Recency-weighted OLS, w = 1/(1+age_years)',
+      r7Loo(snapshot, comparables, r7WeightedCurveFactory(snapshot, (s, p) => 1 / (1 + r7AgeYears(s, p)))),
+      forwardOf(r7WeightedCurveFactory(snapshot, (s, p) => 1 / (1 + r7AgeYears(s, p)))),
+      false,
+      'REJECTED — wins within-2x (32.03% vs 29.69%) but loses on median |log| (3.97x vs 3.95x), so it fails the adopt-on-both rule; forward 3.28x.',
+    ),
+  );
+  variants.push(
+    r7VariantEntry(
+      'recency-exp-half-age',
+      'Recency-weighted OLS, w = exp(-age_years/2)',
+      r7Loo(snapshot, comparables, r7WeightedCurveFactory(snapshot, (s, p) => Math.exp(-r7AgeYears(s, p) / 2))),
+      forwardOf(r7WeightedCurveFactory(snapshot, (s, p) => Math.exp(-r7AgeYears(s, p) / 2))),
+      false,
+      'REJECTED — wins within-2x (32.03% vs 29.69%) but loses on median |log| (3.92x vs 3.95x); forward 3.34x with within-2x falling to 22.58%.',
+    ),
+  );
+  variants.push(
+    r7VariantEntry(
+      'huber',
+      'Huber-robust curve (2 reweighting iterations)',
+      r7Loo(snapshot, comparables, r7CurveFactory(snapshot, r7HuberCurve)),
+      forwardOf(r7CurveFactory(snapshot, r7HuberCurve)),
+      false,
+      'REJECTED — wins median |log| (3.89x vs 3.95x) but loses within-2x (28.91% vs 29.69%), so it fails the adopt-on-both rule; forward 3.14x.',
+    ),
+  );
+  variants.push(
+    r7VariantEntry(
+      'l1',
+      'L1 / median-regression curve (IRLS)',
+      r7Loo(snapshot, comparables, r7CurveFactory(snapshot, r7L1Curve)),
+      forwardOf(r7CurveFactory(snapshot, r7L1Curve)),
+      false,
+      'REJECTED — passes the letter of the rule at the 2025 cutoff (LOO 3.90x / 31.25% vs r5 3.95x / 29.69%; forward 3.13x) but the edge is noise: exact median |log| 3.8998 vs 3.9506 (1.3%), within-2x 40 vs 38 rows, paired LOO 71 better / 57 worse, the Huber sibling fails within-2x, and multi-cutoff forward is mixed (3.73x vs r5 3.42x at 2024-01-01). Not a robust win.',
+    ),
+  );
+  variants.push(
+    r7VariantEntry(
+      'trimmed',
+      'Trimmed OLS (drop |residual| > 2x median |residual|, one pass)',
+      r7Loo(snapshot, comparables, r7CurveFactory(snapshot, r7TrimmedCurve)),
+      forwardOf(r7CurveFactory(snapshot, r7TrimmedCurve)),
+      false,
+      'REJECTED — the |log| edge is 0.3% (exact 3.9387 vs 3.9506) and +1 row within-2x: noise. Forward 3.27x with within-2x falling to 25.81%.',
+    ),
+  );
+  variants.push(
+    r7VariantEntry(
+      'category-slopes',
+      'Category-specific slopes (n>=10: Lending, Dexs)',
+      r7Loo(snapshot, comparables, r7CatSlopeFactory(snapshot)),
+      forwardOf(r7CatSlopeFactory(snapshot)),
+      false,
+      'REJECTED — loses on both LOO criteria (4.10x / 27.34% vs 3.95x / 29.69%); only Lending (15) and Dexs (11) qualify for their own slopes.',
+    ),
+  );
+  for (const kind of ['logAge', 'change7d', 'logChains', 'listedYear'] as const) {
+    const factory = r7SingleTermFactory(snapshot, kind);
+    const label =
+      kind === 'logAge'
+        ? 'Single term: log(FDV) ~ log(TVL) + log(ageDays)'
+        : kind === 'change7d'
+          ? 'Single term: log(FDV) ~ log(TVL) + change_7d'
+          : kind === 'logChains'
+            ? 'Single term: log(FDV) ~ log(TVL) + log(chains)'
+            : 'Single term: log(FDV) ~ log(TVL) + listed year';
+    const reason =
+      kind === 'logAge'
+        ? 'REJECTED — LOO passes both (3.91x / 31.25%) but forward COLLAPSES to 7.84x / 19.35% within-2x: the age term does not travel forward in time.'
+        : kind === 'change7d'
+          ? 'REJECTED — best LOO of the single terms (3.69x / 32.81%, exact |log| 3.6892, +4 rows) and forward 2025 passes (3.16x / 32.26%), but multi-cutoff forward fails: 3.92x vs r5 3.42x at 2024-01-01, 4.58x vs 4.25x at 2024-07-01, reverse 4.20x vs 3.40x at 2025-01-01. The LOO win does not travel forward.'
+          : kind === 'logChains'
+            ? 'REJECTED — LOO passes both (3.90x / 32.03%) but forward |log| rises to 4.02x (+28% vs r5 3.15x) with within-2x falling to 25.81%.'
+            : 'REJECTED — LOO passes both (3.89x / 33.59%) but forward within-2x collapses to 19.35% (3.44x): a vintage proxy, not a predictor.';
+    variants.push(r7VariantEntry(`single-${kind}`, label, r7Loo(snapshot, comparables, factory), forwardOf(factory), false, reason));
+  }
+  variants.push(
+    r7VariantEntry(
+      'unshrunk-effects',
+      'Unshrunk category effects (radar-6 record, recomputed)',
+      r7Loo(snapshot, comparables, r7CurveFactory(snapshot, (train) => buildFit(train).curve, false)),
+      forwardOf(r7CurveFactory(snapshot, (train) => buildFit(train).curve, false)),
+      false,
+      'REJECTED (radar-6) — wins on median |log| (3.88x) but loses on within-2x (28.91% vs 29.69%), so it fails the adopt-on-both rule.',
+    ),
+  );
+  variants.push({
+    id: 'joint-ols-dummies',
+    label: 'Joint OLS log(FDV) ~ log(TVL) + category dummies (radar-6 record)',
+    loo: { median_pred_actual: 0.88, median_abs_log_factor: 4.03, within_2x_pct: 25.78, within_3x_pct: null, within_5x_pct: null },
+    time_split_forward: null,
+    adopted: false,
+    reason:
+      'REJECTED (radar-6) — worse on both LOO criteria (4.03x / 25.78%) despite a full-sample R-squared of 0.317 vs the curve\'s 0.194: 21 parameters overfit. Record-only: within-3x/5x and the forward split were not logged in round 6.',
+  });
+  variants.push(
+    r7VariantEntry(
+      'multivariate-alone',
+      'Multivariate log(FDV) ~ log(TVL) + log(age) + change_7d + log(chains), alone (radar-5/6 record)',
+      multivariate.alone,
+      null,
+      false,
+      'REJECTED (radar-5/6) — wins on median |log| (3.61x) but loses on within-2x (28.91% vs 29.69%); collapses out of time (7.55x forward).',
+    ),
+  );
+  variants.push(
+    r7VariantEntry(
+      'multivariate-with-multipliers',
+      'Multivariate with growth/maturity/breadth multipliers on top (radar-5/6 record)',
+      multivariate.with_multipliers,
+      null,
+      false,
+      'REJECTED (radar-5/6) — loses on within-2x by more (24.22% vs 29.69%): the multipliers double-count what the regression already absorbs.',
+    ),
+  );
+  return variants;
+}
+
+/**
+ * The bootstrap rank ranges (radar-7): resample the 128 comparables WITH replacement 200
+ * times (mulberry32, fixed seed R7_BOOTSTRAP_SEED), refit the kept curve + effects (+ the
+ * multipliers, exactly as the board scores), recompute every board row's implied value and
+ * rank, and store per row the p5/p95 rank and the p5/p95 implied value. This is evidence
+ * about the kept model, not a model change: it ships regardless of adoption. Ranks sort by
+ * implied value descending with the slug as the tiebreak, exactly as buildBoard sorts.
+ */
+export function r7BootstrapRankRanges(
+  snapshot: Snapshot,
+  board: BoardRow[],
+): Map<string, { rank_low: number; rank_high: number; implied_low_boot_usd: number; implied_high_boot_usd: number }> {
+  const comparables = comparablesOf(snapshot);
+  const multiples = categoryMultiples(snapshot);
+  const bySlug = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  const ranks = new Map<string, number[]>();
+  const implieds = new Map<string, number[]>();
+  for (const row of board) {
+    ranks.set(row.slug, []);
+    implieds.set(row.slug, []);
+  }
+  const rand = mulberry32(R7_BOOTSTRAP_SEED);
+  for (let b = 0; b < R7_BOOTSTRAP_REFITS; b++) {
+    const sample: Comparable[] = [];
+    for (let i = 0; i < comparables.length; i++) sample.push(comparables[Math.floor(rand() * comparables.length)]!);
+    const fit = buildFit(sample);
+    const scored = board.map((row) => ({
+      slug: row.slug,
+      implied: impliedValue(bySlug.get(row.slug)!, snapshot.as_of, MODEL, fit, multiples).implied,
+    }));
+    scored.sort((a, b) => b.implied - a.implied || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+    scored.forEach((s, i) => {
+      ranks.get(s.slug)!.push(i + 1);
+      implieds.get(s.slug)!.push(s.implied);
+    });
+  }
+  const out = new Map<string, { rank_low: number; rank_high: number; implied_low_boot_usd: number; implied_high_boot_usd: number }>();
+  for (const row of board) {
+    out.set(row.slug, {
+      rank_low: Math.round(quantile(ranks.get(row.slug)!, 0.05)),
+      rank_high: Math.round(quantile(ranks.get(row.slug)!, 0.95)),
+      implied_low_boot_usd: Math.round(quantile(implieds.get(row.slug)!, 0.05)),
+      implied_high_boot_usd: Math.round(quantile(implieds.get(row.slug)!, 0.95)),
+    });
+  }
+  return out;
+}
+
+/** The bootstrap summary over the per-row ranges: median and p90 rank width, and the top-10 widths. */
+export function r7BootstrapSummary(
+  board: BoardRow[],
+  ranges: Map<string, { rank_low: number; rank_high: number; implied_low_boot_usd: number; implied_high_boot_usd: number }>,
+): BootstrapSummary {
+  const widths = board.map((r) => ranges.get(r.slug)!.rank_high - ranges.get(r.slug)!.rank_low);
+  const top10 = board.slice(0, 10).map((r) => ranges.get(r.slug)!.rank_high - ranges.get(r.slug)!.rank_low);
+  return {
+    refits: R7_BOOTSTRAP_REFITS,
+    seed: R7_BOOTSTRAP_SEED,
+    median_rank_width: round2(median(widths)),
+    p90_rank_width: round2(quantile(widths, 0.9)),
+    top10_median_rank_width: round2(median(top10)),
+    top10_max_rank_width: Math.max(...top10),
+  };
+}
+
+/**
+ * The multi-cutoff walk-forward (radar-7): forward splits at 2024-01-01, 2024-07-01 and
+ * 2025-01-01 (fit strictly earlier listings, test strictly later ones), plus the reverse split
+ * at 2024-07-01. Each entry reuses timeSplitBacktest, so the 2025-01-01 forward entry
+ * reproduces validation.time_split exactly.
+ */
+export function r7WalkForward(snapshot: Snapshot): WalkForwardEntry[] {
+  const out: WalkForwardEntry[] = [];
+  for (const cutoff of R7_WALK_FORWARD_CUTOFFS) {
+    const s = timeSplitBacktest(snapshot, cutoff, false);
+    out.push({ ...s, direction: 'forward' });
+  }
+  const reverse = timeSplitBacktest(snapshot, '2024-07-01', true);
+  out.push({ ...reverse, direction: 'reverse' });
+  return out;
+}
+
+/**
+ * The farm/thin/skip verdict (radar-7): examine the distribution of net_low_usd and
+ * plan_gas_usd across the board and only adopt a rule if it honestly discriminates. It does
+ * not: every row nets positive at band low (min $12,724) and gas is $0-$20 everywhere, so any
+ * net_low threshold would only relabel the board by implied value. No rule is invented; the
+ * verdict and the distribution ship instead.
+ */
+export function r7FarmRuleAssessment(board: BoardRow[]): FarmRuleAssessment {
+  const nets = board.map((r) => r.net_low_usd).sort((a, b) => a - b);
+  const gasMax = Math.max(...board.map((r) => r.plan_gas_usd));
+  return {
+    verdict: 'no-discriminating-rule',
+    rule: null,
+    net_low_min_usd: nets[0]!,
+    net_low_median_usd: median(nets),
+    net_low_max_usd: nets[nets.length - 1]!,
+    rows_net_low_at_least_50k: nets.filter((v) => v >= 50000).length,
+    rows_net_low_below_50k: nets.filter((v) => v < 50000).length,
+    rows_net_low_at_most_0: nets.filter((v) => v <= 0).length,
+    plan_gas_max_usd: gasMax,
+    reason:
+      'No honest farm/thin/skip rule discriminates: all 198 net_low_usd are positive (min $12,724, median $73,472.50, max $1,018,194) and plan gas is $0-$20 everywhere (breakeven FDV at most $400), so every row clears any plausible gas-based bar by orders of magnitude. A $50K net_low cut would label 139 rows farm / 59 thin, but net_low is nearly monotonic in implied value (5% of the band low minus trivial gas), so the cut would only relabel the top 70% by value with no economic content — the bottom row still nets $12,724 at band low.',
   };
 }
 
@@ -1195,6 +1940,17 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
   const early = board.filter((r) => !snapshot.watchlist.includes(r.slug)).length;
   const loo = looBacktest(snapshot);
   const multi = looMultivariate(snapshot);
+  // Radar-7 validation only: the kept model is untouched, so the board values are the radar-5
+  // ones; the bootstrap ranges are attached to the board rows before the dashboard rows are
+  // mapped, so board.json and data.js carry the same per-row ranges.
+  const ranges = r7BootstrapRankRanges(snapshot, board);
+  for (const row of board) {
+    const range = ranges.get(row.slug)!;
+    row.rank_low = range.rank_low;
+    row.rank_high = range.rank_high;
+    row.implied_low_boot_usd = range.implied_low_boot_usd;
+    row.implied_high_boot_usd = range.implied_high_boot_usd;
+  }
   const radar: RadarData = {
     as_of: snapshot.as_of,
     source: snapshot.source,
@@ -1220,6 +1976,10 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
       loo_multivariate_with_multipliers: multi.with_multipliers,
       multivariate_fit: multi.fit,
       farmer_share_assumption: FARMER_SHARE,
+      walk_forward: r7WalkForward(snapshot),
+      model_variants: r7ModelVariants(snapshot, multi),
+      bootstrap: r7BootstrapSummary(board, ranges),
+      farm_rule: r7FarmRuleAssessment(board),
     },
     comparables,
     rows: board.map(radarRow),
