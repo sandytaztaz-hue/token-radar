@@ -3,26 +3,75 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar (radar-6): pre-token protocols ranked by implied value</title>
+<title>Token Radar — every pre-token protocol, ranked by implied value</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<main id="board" tabindex="-1" aria-busy="true">
-  <!-- Static summary, replaced by the dashboard once data.js loads: 198
-       pre-token protocols ranked by implied value — the 40 watchlist
-       protocols, 158 early protocols below the $50M floor, and 20 rankable
-       protocols above the floor, each flagged — from a fitted size curve
-       (log FDV = 6.96 + 0.52·log TVL, n=128, R²=0.19) plus a category
-       correction, plotted as a log-log scatter against all 128 comparables.
-       Every value is a band; every plan is netted at the band's low.
-       Time-split validation (fit pre-2025, test 2025+) shows a vintage
-       bias: newer listings command higher FDV/TVL. All 198 farm plans are
-       researched; plan gas median $4. 72 above-floor protocols set aside. -->
-  <div class="wrap">
-    <h1>Token Radar</h1>
-    <p>Pre-token protocols, ranked by implied value. Loading the board…</p>
-  </div>
+<header class="top">
+  <div class="brand"><span class="dot" aria-hidden="true"></span>TOKEN RADAR</div>
+  <h1>Which protocols without a token are worth the most?</h1>
+  <p class="lede">Every protocol in the snapshot that has no token yet — <strong id="stat-rows">342</strong> of them — ranked by the value a token would plausibly have. The value is priced from protocols that already have a token, not from a favourite list. Click any row for the full breakdown and a step-by-step farm plan.</p>
+  <dl class="stats">
+    <div><dt>Protocols ranked</dt><dd id="stat-board">342</dd></div>
+    <div><dt>Watchlist covered</dt><dd id="stat-watch">40 / 40</dd></div>
+    <div><dt>Snapshot date</dt><dd id="stat-date">2026-11-14</dd></div>
+    <div><dt>Top implied value</dt><dd id="stat-top">—</dd></div>
+  </dl>
+</header>
+
+<section class="controls" aria-label="Board controls">
+  <label>Search <input id="q" type="search" placeholder="Protocol or category name" autocomplete="off"></label>
+  <label>Category <select id="f-cat"><option value="">All categories</option></select></label>
+  <label>Chain <select id="f-chain"><option value="">All chains</option></select></label>
+  <label>Show <select id="f-status"><option value="">All pre-token</option><option value="watchlist">Watchlist only</option></select></label>
+  <label>Sort by <select id="f-sort"><option value="value">Implied value</option><option value="tvl">TVL</option><option value="growth">7-day growth</option><option value="age">Age with no token</option><option value="name">Name A–Z</option></select></label>
+  <p class="count" id="count" aria-live="polite"></p>
+</section>
+
+<main>
+  <table class="board" id="board">
+    <thead><tr>
+      <th scope="col" class="num" data-sort="rank">Rank</th>
+      <th scope="col" data-sort="name">Protocol</th>
+      <th scope="col" data-sort="category">Category</th>
+      <th scope="col" class="num" data-sort="tvl">TVL</th>
+      <th scope="col" class="num" data-sort="growth">7d growth</th>
+      <th scope="col" class="num" data-sort="value">Implied value</th>
+      <th scope="col">Token status</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+  <p class="empty" id="empty" hidden>No protocol matches these filters. Clear the search or pick another category.</p>
 </main>
+
+<section class="panel detail" id="detail" aria-labelledby="detail-h" hidden>
+  <h2 id="detail-h">Protocol detail</h2>
+  <div id="detail-body"></div>
+</section>
+
+<section class="panel" id="how" aria-labelledby="how-h">
+  <h2 id="how-h">How the value is priced</h2>
+  <p>We look at the <strong id="fit-n">128</strong> protocols in the snapshot that already trade, and for each one divide its market cap by its TVL. The middle value inside each category becomes that category's price — Lending pays about 13 cents per dollar of TVL, Dexs about 34 cents, bridges about 56 cents. Big protocols get a smaller price per dollar (the size fit says value grows slower than TVL), a fast-growing week adds a little, a long wait with no token adds a little, and running on more chains adds a little. The formula is:</p>
+  <p class="formula">implied value = TVL × category price × size factor × growth factor × age factor × chain factor</p>
+  <p class="fitline" id="fit-line">Fit: log-log slope 0.52, R² 0.19, global middle price 0.20.</p>
+  <table class="multiples" id="multiples">
+    <caption>Category prices (market cap per $1 of TVL, middle value of the protocols that trade)</caption>
+    <thead><tr><th scope="col">Category</th><th scope="col" class="num">Price</th><th scope="col" class="num">Protocols</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p class="note">A protocol with no token is priced from its own TVL, growth, age and chains only. No name is ever given a special price. Protocols that already have a token are listed separately below the board — they are the market's own values, not our estimate.</p>
+</section>
+
+<section class="panel live" aria-labelledby="live-h">
+  <h2 id="live-h">Already has a token — the market's own values</h2>
+  <p>These protocols already trade, so the board does not rank them. Their market caps are shown as they are, for comparison with the estimates above.</p>
+  <table class="board slim" id="live-table">
+    <thead><tr><th scope="col">Protocol</th><th scope="col">Category</th><th scope="col" class="num">TVL</th><th scope="col" class="num">Market cap</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<footer><p>Token Radar · snapshot 2026-11-14 · values are estimates from public TVL and market-cap figures, not investment advice. Farm plans are a starting checklist, not a promise of a token.</p></footer>
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>

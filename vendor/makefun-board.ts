@@ -1,6 +1,6 @@
-// make.fun's dashboard-dossier library for Node 22: one file, the Node standard library only,
-// erasable TypeScript, so it runs as-is under `node main.ts` with no flags, no build and no install.
-// Import it from your repository's vendor/makefun-board.ts:
+// make.fun's dashboard-dossier library for Node 22: one file, the Node standard library only, erasable
+// TypeScript, so it runs as-is under `node main.ts` with no flags, no build and no install. Copy it to
+// vendor/makefun-board.ts in your repository (a copy anywhere else counts as lines you wrote) and import it:
 //
 //   import { buildDossier } from './vendor/makefun-board.ts';
 //   writeFileSync('/output/dossier.json', buildDossier('/output', { text_max_bytes: 65536 }));
@@ -11,7 +11,7 @@
 //   buildDossier(dir, caps)  the dossier (makefun/dossier/v1) of a dashboard directory, as canonical
 //                            JSON bytes: the screenshots plus a text of the page's source
 //
-// A dossier is one JSON object:
+// A dossier is one JSON object (contracts/dossier.ts):
 //
 //   schema   "makefun/dossier/v1"
 //   cover    0: the first screenshot by name is the cover
@@ -32,20 +32,22 @@
 // refuses, a screenshot that is not a whole PNG or JPEG, a screenshot past its byte cap or more
 // screenshots than the count cap, a dashboard file that is not plain (a link, a dot-directory, a name
 // that is not letters, digits and . _ -, a file past its byte cap or more files than the count cap),
-// a text cap that cannot hold the Dashboard block and the cut line, and a dossier past 1.5 MiB; it
-// never includes or skips a file past a cap.
+// a text cap that cannot hold the Dashboard block and the cut line, and a dossier past DOSSIER_MAX_BYTES.
+// The caps only refuse: they never shape the bytes. Only text_max_bytes shapes them, so a program that
+// passes {text_max_bytes} and writes the result has written what the scorer, given its other caps too,
+// compares byte for byte.
 
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** The dossier schema buildDossier writes. */
+/** The dossier schema buildDossier writes (contracts/dossier.ts DOSSIER_SCHEMA). */
 export const DOSSIER_SCHEMA = 'makefun/dossier/v1';
-/** The most bytes a dossier holds: 4 MiB. */
+/** The most bytes a dossier holds (contracts/dossier.ts DOSSIER_MAX_BYTES): 4 MiB. */
 export const DOSSIER_MAX_BYTES = 4 * 1024 * 1024;
-/** The most images a dossier holds. */
+/** The most images a dossier holds (contracts/dossier.ts DOSSIER_MAX_IMAGES). */
 export const DOSSIER_MAX_IMAGES = 8;
-/** A plain file's name: a letter, digit or _ first, then letters, digits and . _ -, 1 to 128 of them, no directory. */
+/** A plain file's name (contracts/dossier.ts DossierImageName): a letter, digit or _ first, then letters, digits and . _ -, 1 to 128 of them, no directory. */
 export const PLAIN_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 /** A dashboard file whose contents the dossier's text shows: source, never an image. */
 export const TEXT_FILE = /\.(?:html|css|js|json|mjs|svg|md|txt)$/;
@@ -206,25 +208,12 @@ function dashboardFiles(root: string, caps: { max_files: number; max_bytes: numb
 
 // ---------------------------------------------------------------- the dossier
 
-/** A shown file as the dossier shows it. */
-interface ShownFile {
-  bytes: Uint8Array;
-  text: string;
-  fence: string;
-  /** The language the fence opens with (the file's extension, mjs as js). */
-  lang: string;
-  /** The fenced block: the fence and the language, the text (a last LF added when it lacks one), the fence, a blank line. */
-  block: string;
-  blockBytes: number;
-  lines: number;
-}
-
 /**
- * The dossier (makefun/dossier/v1) of a dashboard directory, as canonical JSON bytes:
- * `dir/screenshots/`'s PNG and JPEG files (names starting with '.' skipped) are its images, the first
- * the cover; its text is the "## Dashboard" block and the "## Source" sections described above, capped
- * at `caps.text_max_bytes` UTF-8 bytes with the cut rule above. Throws DossierError on caps it cannot
- * keep and on a dashboard or screenshots directory it refuses (see the header).
+ * The dossier (makefun/dossier/v1, contracts/dossier.ts) of a dashboard directory, as canonical JSON
+ * bytes: `dir/screenshots/`'s PNG and JPEG files (names starting with '.' skipped) are its images, the
+ * first the cover; its text is the "## Dashboard" block and the "## Source" sections described above,
+ * capped at `caps.text_max_bytes` UTF-8 bytes with the cut rule above. Throws DossierError on caps it
+ * cannot keep and on a dashboard or screenshots directory it refuses (see the header).
  */
 export function buildDossier(dir: string, caps: DossierCaps): Uint8Array {
   const max = caps.text_max_bytes;
@@ -340,13 +329,26 @@ export function buildDossier(dir: string, caps: DossierCaps): Uint8Array {
   return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.length);
 }
 
+/** A shown file as the dossier shows it. */
+interface ShownFile {
+  bytes: Uint8Array;
+  text: string;
+  fence: string;
+  /** The language the fence opens with (the file's extension, mjs as js). */
+  lang: string;
+  /** The fenced block: the fence and the language, the text (a last LF added when it lacks one), the fence, a blank line. */
+  block: string;
+  blockBytes: number;
+  lines: number;
+}
+
 /**
- * A file's section cut inside its contents: its heading, its first k lines in its fence (closed), a
- * line naming how many of its lines are not shown, then `tail(hidden)` (the cut line, given the bytes
- * this file leaves out), k the most lines (at least one, fewer than all) whose whole fits in `room`
- * UTF-8 bytes; null when not one line fits. It cuts only after a line's LF, which is never inside a
- * UTF-8 sequence nor a replacement character's bytes, so no character is split, and a line's shown
- * bytes are those of its text.
+ * A file's section cut inside its contents: its heading, its first k lines in its fence (closed), a line
+ * naming how many of its lines are not shown, then `tail(hidden)` (the cut line, given the bytes this
+ * file leaves out), k the most lines (at least one, fewer than all) whose whole fits in `room` UTF-8
+ * bytes; null when not one line fits. It cuts only after a line's LF, which is never inside a UTF-8
+ * sequence nor a replacement character's bytes, so no character is split, and a line's shown bytes are
+ * those of its text.
  */
 function fileHead(heading: string, code: ShownFile, room: number, tail: (hidden: number) => string): string | null {
   const total = code.lines;

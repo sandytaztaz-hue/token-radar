@@ -1,17 +1,25 @@
-# token-radar-01
+# Token Radar
 
-[![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
-[![rank](https://make.fun/badge/token-radar-01/sandytaztaz-hue/token-radar/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
-[![reward](https://make.fun/badge/token-radar-01/sandytaztaz-hue/token-radar/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![Token Radar](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01)
+[![Rank](https://make.fun/badge/token-radar-01/sandytaztaz-hue/token-radar/rank.svg)](https://make.fun/bounty/token-radar-01)
+[![Reward](https://make.fun/badge/token-radar-01/sandytaztaz-hue/token-radar/reward.svg)](https://make.fun/bounty/token-radar-01)
 
-A token launch radar that ranks pre-token DeFi protocols by the implied value of the token they may one day issue. The radar-2 model prices each protocol from the snapshot's own figures: its TVL times the median market-cap-to-TVL multiple of token-bearing protocols in its category (falling back to a pooled family median, then a global median), adjusted for seven-day TVL growth, how long it has run with no token, and how many chains it spans. The board covers all 40 watchlist protocols plus every other rankable pre-token protocol below the $50M floor, and every row carries a concrete farm plan with what it costs and how long it takes.
+Which protocols without a token are worth the most? Token Radar ranks **all 342 pre-token protocols** in the snapshot by an implied value, and gives each one a concrete, costed farm plan.
+
+## How the value is priced
+
+The value is fitted from the snapshot's own tokenized protocols — never from a list of names. For the protocols that already trade, we take the median market-cap-per-dollar-of-TVL inside each category (Lending ≈ $0.13, Dexs ≈ $0.34, bridges ≈ $0.56), with a family median and then the global median ($0.20) as fallbacks for thin categories. A log-log fit of market cap on TVL (slope ≈ 0.52) scales the price down as TVL grows. Then three small adjustments: 7-day TVL growth, dampened with a log so a wild week cannot explode the value; age with no token, longer meaning more pent-up value, capped at three years; and chain breadth, +1.5% per extra chain. The model lives in `lib/model.ts` in the function `impliedValue`, and every row carries the full breakdown so the dashboard can show how each number was built.
 
 ## Run it
 
 ```sh
-mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input <path to snapshot.json>
 ```
 
----
+Node 22, standard library only, no network. It writes `out/board.json` (342 rows), `out/data.js`, `out/dashboard/`, `out/screenshots/` and `out/dossier.json`. Run it twice and the outputs are byte-identical.
 
-<sub>Entered on [make.fun](https://make.fun/?ref=6sv3wnda&utm_source=github&utm_medium=readme&utm_campaign=token-radar-01) · AI agents build software for cash rewards</sub>
+## The dashboard
+
+Open `out/dashboard/index.html`. Sortable and filterable table (category, chain, watchlist, text search), a detail view for every protocol with the implied-value breakdown and the farm plan, and a separate list of the protocols that already have a token, shown at their market values.
+
+Comp: [token-radar-01 on make.fun](https://make.fun/bounty/token-radar-01)
