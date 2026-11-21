@@ -1,7 +1,9 @@
-/* Token Radar — dense dark board, kiencx appearance (r5):
+/* Token Radar — dense dark board, kiencx appearance (r6):
    bg #0e141b, panels #131821, white "Launch Radar" title, tab-pill
    filters with sliders, 3-line verdict cells, farm plan in the detail
-   right column. Model, data and verdicts are unchanged from r4. */
+   right column. r6: default board keeps every watchlist row, token
+   odds are a logistic fit, evidence text is larger and cleaner. The
+   fitted-multiple model and the farm-plan structure are unchanged. */
 :root { --bg:#0e141b; --panel:#131821; --line:#26303d; --text:#e6edf3; --muted:#9aa7b4;
   --accent:#f0b429; --accent-ink:#1a1405; --green:#3fb950; --red:#f47067; --row:#11161d;
   --blue:#58a6ff; --purple:#bc8cff; --purple-chip:#8957e5; --teal:#39c5cf; --pink:#f778ba; }
@@ -13,47 +15,47 @@ h2 { font-size:15px; margin:0 0 6px; }
 h3 { font-size:12.5px; margin:0 0 5px; }
 p { margin:0 0 8px; }
 .top-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
-.brand h1 { font-size:16px; font-weight:800; margin:0; line-height:1.2; color:#fff; }
-.brand .sub { color:var(--muted); font-size:11px; margin:0; }
-.top .src { color:var(--muted); font-size:11.5px; margin:1px 0 0; white-space:nowrap; }
+.brand h1 { font-size:16px; font-weight:800; margin:0; line-height:1.1; color:#fff; }
+.brand .sub { color:var(--muted); font-size:11px; margin:0; line-height:1.2; }
+.top .src { color:var(--muted); font-size:11.5px; margin:0; white-space:nowrap; }
 .top .src b { color:var(--text); font-weight:700; }
-.stats { display:grid; grid-template-columns:repeat(6,1fr); gap:5px; margin:3px 0 0; }
-.stats div { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:3px 9px 2px; }
+.stats { display:grid; grid-template-columns:repeat(6,1fr); gap:5px; margin:1px 0 0; }
+.stats div { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:2px 9px 1px; }
 .stats dt { color:var(--muted); font-size:10px; line-height:1.3; }
-.stats dd { margin:1px 0 0; font-size:13.5px; font-weight:800; font-variant-numeric:tabular-nums; }
+.stats dd { margin:0; font-size:13.5px; font-weight:800; font-variant-numeric:tabular-nums; }
 .stats dd.sub { font-size:9.5px; font-weight:400; color:var(--muted); line-height:1.3; margin-top:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .s1 dd { color:var(--green); } .s2 dd { color:var(--green); } .s3 dd { color:var(--blue); }
 .s4 dd { color:var(--purple); } .s5 dd { color:var(--teal); } .s6 dd { color:var(--pink); }
-.oneliner { color:var(--muted); font-size:11px; margin:1px 0 2px; }
+.oneliner { color:var(--muted); font-size:11px; margin:0 0 1px; }
 .formula { background:var(--bg); border:1px solid var(--line); border-left:4px solid var(--accent);
   border-radius:6px; padding:6px 10px; font-size:12px; font-weight:600; margin-bottom:6px; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:0 0 4px; }
-.panel.acct { padding:1px 14px 2px; }
-.acct h2, .evidence h2 { font-size:11px; margin-bottom:2px; }
-.acct-note { color:var(--muted); font-size:11.5px; margin-bottom:3px; }
-.bar { display:flex; height:10px; border-radius:5px; overflow:hidden; margin:0 0 4px; border:1px solid var(--line); }
+.panel.acct { padding:0 14px 1px; }
+.acct h2, .evidence h2 { font-size:11px; line-height:1.2; margin-bottom:1px; }
+.acct-note { color:var(--muted); font-size:11.5px; line-height:1.3; margin-bottom:2px; }
+.bar { display:flex; height:10px; border-radius:5px; overflow:hidden; margin:0 0 3px; border:1px solid var(--line); }
 .bar span { display:block; height:100%; }
 .b-watch { background:var(--purple); } .b-other { background:var(--teal); }
 .b-priced { background:var(--accent); } .b-nocap { background:#6e7681; }
 .b-out1 { background:var(--red); } .b-out2 { background:#e8954a; } .b-out3 { background:var(--pink); }
 .b-out4 { background:var(--blue); } .b-out5 { background:var(--green); }
-.legend { list-style:none; display:flex; flex-wrap:wrap; gap:2px 14px; margin:0 0 3px; padding:0; font-size:10.5px; color:var(--muted); }
+.legend { list-style:none; display:flex; flex-wrap:wrap; gap:2px 14px; margin:0 0 2px; padding:0; font-size:10.5px; color:var(--muted); }
 .legend strong { color:var(--text); }
 .legend .sw { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px; }
-.checks { font-size:10.5px; margin:0; }
+.checks { font-size:10.5px; line-height:1.3; margin:0; }
 .checks .ok { color:var(--green); }
 .checks .bad { color:var(--red); }
-.panel.evidence { padding:2px 14px 2px; }
-.evidence .note { font-size:11px; margin-bottom:2px; }
+.panel.evidence { padding:0 14px 1px; }
+.evidence .note { font-size:10.5px; line-height:1.3; margin-bottom:0; }
 .ev-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
-.ev-grid h3 { font-size:10px; color:var(--muted); font-weight:600; line-height:1.25; margin:0 0 3px; }
-table.mini { border-collapse:collapse; width:100%; font-size:9.5px; line-height:1.15; }
+.ev-grid h3 { font-size:11px; color:var(--muted); font-weight:600; line-height:1.15; margin:0 0 1px; }
+table.mini { border-collapse:collapse; width:100%; font-size:10px; line-height:1.25; }
 .mini th, .mini td { border-bottom:1px solid var(--line); padding:0 6px 0 0; text-align:left; }
-.mini th { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.03em; }
+.mini th { color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; }
 .mini td.num, .mini th.num { text-align:right; font-variant-numeric:tabular-nums; }
-.kept { color:var(--green); font-weight:700; font-size:11px; }
-.notkept { color:var(--muted); font-size:11px; }
-#ev-boot { font-size:10.5px; margin:3px 0 0; }
+.kept { color:var(--green); font-weight:700; font-size:12px; }
+.notkept { color:var(--muted); font-size:12px; font-weight:600; }
+#ev-boot { font-size:10.5px; line-height:1.3; margin:0; }
 .fitline { color:var(--muted); }
 .note { color:var(--muted); font-size:12px; }
 .multiples { border-collapse:collapse; margin:6px 0 8px; font-size:12px; }
@@ -61,8 +63,8 @@ table.mini { border-collapse:collapse; width:100%; font-size:9.5px; line-height:
 .multiples th, .multiples td { border-bottom:1px solid var(--line); padding:3px 14px 3px 0; text-align:left; }
 .num { text-align:right !important; font-variant-numeric:tabular-nums; }
 /* ---- filters: tab pills + sliders row, then search row ---- */
-.controls { margin:0 0 2px; }
-.tabs { display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin-bottom:3px; }
+.controls { margin:0 0 1px; }
+.tabs { display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin-bottom:2px; }
 .tabs button { background:var(--panel); color:var(--text); border:1px solid var(--line);
   border-radius:6px; padding:1px 8px; font-size:11px; cursor:pointer; white-space:nowrap; }
 .tabs button:hover { border-color:var(--muted); }
@@ -84,7 +86,7 @@ table.mini { border-collapse:collapse; width:100%; font-size:9.5px; line-height:
 .frow .count { margin:0 0 0 auto; color:var(--muted); font-size:12px; }
 table.board { width:100%; border-collapse:collapse; background:var(--panel);
   border:1px solid var(--line); border-radius:10px; overflow:hidden; font-size:11.5px; }
-.board th { padding:1px 6px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; line-height:1.15; }
+.board th { padding:0 6px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; line-height:1.15; }
 .board td { padding:0 6px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; line-height:1.15; }
 .board thead th { background:#1a2230; color:var(--muted); font-size:10px; text-transform:uppercase;
   letter-spacing:.03em; cursor:pointer; position:sticky; top:0; white-space:nowrap; }
@@ -116,7 +118,7 @@ th .q { display:inline-block; border:1px solid var(--muted); border-radius:50%; 
 .verdict.farm { color:#0d1117; background:var(--green); }
 .verdict.marginal { color:var(--accent-ink); background:var(--accent); }
 .verdict.skip { color:var(--muted); border:1px solid var(--muted); }
-.vcell { line-height:1.1; white-space:nowrap; }
+.vcell { line-height:1.05; white-space:nowrap; }
 .vcell .vnet { display:block; font-weight:700; font-size:10.5px; }
 .vcell .vdrop { display:block; color:var(--muted); font-size:9.5px; }
 .odds { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; font-variant-numeric:tabular-nums; }

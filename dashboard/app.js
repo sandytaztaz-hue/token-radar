@@ -1,10 +1,13 @@
-/* Token Radar dashboard (r5, kiencx appearance): Launch Radar header,
-   tab-pill filters + deposit/drop-share/horizon controls, checkbox +
-   rank-range column, merged implied-value column, 3-line verdict cells,
-   detail view with chips row and the full 10-step farm plan in the right
-   column. Model, data and verdicts are unchanged from r4: the tabs and
-   sliders only re-cut the board's own numbers, never the verdicts. No
-   network: all data comes from ../data.js (window.RADAR). */
+/* Token Radar dashboard (r6): Launch Radar header, tab-pill filters +
+   deposit/drop-share/horizon controls, checkbox + rank-range column,
+   merged implied-value column, 3-line verdict cells, detail view with
+   chips row and the full 10-step farm plan in the right column. r6:
+   the default board keeps every watchlist row, and the token odds are
+   a logistic fit (age, category, growth, size, chains); the
+   fitted-multiple model and the farm-plan structure are unchanged
+   from r5. The tabs and sliders only re-cut the board's own numbers,
+   never the verdicts. No network: all data comes from ../data.js
+   (window.RADAR). */
 (function () {
   'use strict';
   var D = window.RADAR;
@@ -74,11 +77,12 @@
 
   var fit = D.fit, st = D.stats, acct = D.accounting, def = D.default_board;
 
-  /* Default board: DeFi only. The full 342-row board stays in D.rows;
-     the board opens on the DeFi rows (def.board_size), each with a
-     stable DeFi rank for the rank column. */
+  /* Default board: DeFi rows plus every watchlist row, whatever its
+     category. The full 342-row board stays in D.rows; the board opens
+     on the default rows (def.board_size), each with a stable default
+     rank for the rank column. */
   var EXCLUDED = new Set(def ? def.excluded_categories : []);
-  var boardRows = rows.filter(function (r) { return !EXCLUDED.has(r.category); });
+  var boardRows = rows.filter(function (r) { return r.watchlist || !EXCLUDED.has(r.category); });
   boardRows.forEach(function (r, i) { r._defiRank = i + 1; });
   var EARLY_FLOOR = 50e6;
 
@@ -97,17 +101,27 @@
   $('s-farm').textContent = def.farm_count + ' of ' + def.board_size;
   $('s-farm-sub').textContent = def.marginal_count + ' marginal, ' + def.skip_count + ' skip';
   $('s-watch').textContent = D.watchlist_size + ' / ' + D.watchlist_size;
-  $('s-watch-sub').textContent = def.watchlist_in_default + ' in the DeFi board · ' + def.excluded_count + ' non-DeFi out of it';
+  $('s-watch-sub').textContent = def.watchlist_in_default + ' in the board · ' + def.excluded_count + ' non-DeFi out of it';
+
+  /* Tab counts come from the default-board summary, so the pills can
+     never disagree with the data: All / Farm / Marginal / Skip. */
+  document.querySelectorAll('#tabs button[data-tab]').forEach(function (b) {
+    var t = b.getAttribute('data-tab');
+    if (t === 'all') b.textContent = 'All ' + def.board_size;
+    if (t === 'farm') b.textContent = 'Farm ' + def.farm_count;
+    if (t === 'marginal') b.textContent = 'Marginal ' + def.marginal_count;
+    if (t === 'skip') b.textContent = 'Skip ' + def.skip_count;
+  });
 
   /* Protocol accounting: one segmented bar over the whole 758-ledger —
      DeFi ranked, the five Out groups, priced comps, no usable cap. */
   var total = acct.total;
   $('acct-note').textContent = 'all ' + total + ' snapshot protocols in exactly one group: ' + def.board_size +
-    ' ranked DeFi-only in the default board, ' + def.excluded_count + ' non-DeFi pre-token out of it, ' +
+    ' ranked in the default board, ' + def.excluded_count + ' non-DeFi pre-token out of it, ' +
     acct.priced_comps + ' already record a token, ' + acct.token_no_cap + ' left out by the house list\u2019s own rules';
   var barParts = [
-    { n: def.watchlist_in_default, cls: 'b-watch', label: 'Ranked DeFi · watchlist' },
-    { n: def.board_size - def.watchlist_in_default, cls: 'b-other', label: 'Ranked DeFi · other' }
+    { n: def.watchlist_in_default, cls: 'b-watch', label: 'Ranked · watchlist' },
+    { n: def.board_size - def.watchlist_in_default, cls: 'b-other', label: 'Ranked · other' }
   ];
   def.excluded_groups.forEach(function (g, i) {
     barParts.push({ n: g.count, cls: 'b-out' + (i + 1), label: 'Out: ' + g.group });
@@ -163,6 +177,15 @@
       '<td>' + (t.stage === 'base rate' ? '<span class="kept">baseline</span>' : keptTag(t.kept)) + '</td>';
     evO.appendChild(tr);
   });
+  /* The odds model is held to the same two tests as the value model:
+     leave-one-out and walk-forward Brier, each against the base rate
+     on the same rows. */
+  var wfNote = document.getElementById('ev-odds-wf');
+  if (wfNote && typeof st.odds_loo_brier === 'number' && typeof st.odds_wf_brier === 'number') {
+    wfNote.textContent = 'Logistic odds: leave-one-out Brier ' +
+      st.odds_loo_brier.toFixed(3) + ' vs ' + st.odds_loo_base_brier.toFixed(3) + ' base; walk-forward ' +
+      st.odds_wf_brier.toFixed(3) + ' vs ' + st.odds_wf_base_brier.toFixed(3) + ' base.';
+  }
   var evR = document.querySelector('#ev-range tbody');
   evR.innerHTML =
     '<tr><td>inside P25–P75, stated 50%</td><td class="num">' + Math.round(st.inside_p25_p75 * 100) + '%</td><td class="num">' + Math.round(st.wf_inside_p25_p75 * 100) + '%</td></tr>' +
@@ -188,7 +211,8 @@
   });
 
   /* ---- Filters. The category / chain lists come from the board in view,
-     so the DeFi board never offers an excluded category. ---- */
+     so the default board never offers an excluded category — except a
+     watchlist row's own category, which is in the board by exception. ---- */
   function buildFilterOptions() {
     var base = state.scope === 'defi' ? boardRows : rows;
     var cats = [], chains = [];
@@ -289,7 +313,7 @@
     $('filter-note').textContent = FILTER_NOTES[state.tab] || '';
     $('empty').hidden = list.length > 0;
     tbody.innerHTML = list.map(function (r) {
-      /* Rank column: the DeFi rank in the default board, the model rank
+      /* Rank column: the default-board rank in the default board, the model rank
          everywhere else; the bootstrap rank range sits below it. */
       var rankCell = state.scope === 'defi' ? r._defiRank : r.rank;
       var cut = planCut(r);
@@ -461,7 +485,7 @@
       { term: 'Size curve', expl: 'slope ' + (fit.logLogSlope - 1).toFixed(2) + ' in ln(TVL / ' + money(fit.medianCompTvl) + ' pivot); held-out miss ×' + vt.size.loo_miss.toFixed(2) + ' leave-one-out, ×' + vt.size.wf_miss.toFixed(2) + ' walk-forward', fac: '×' + m.sizeFactor.toFixed(2), total: false },
       { term: 'Category · ' + (r.category || 'Uncategorised'), expl: m.categoryEffectN + ' priced tokens, shrunk by 16 pseudo-observations; held-out miss ×' + vt.category.loo_miss.toFixed(2) + ' leave-one-out, ×' + vt.category.wf_miss.toFixed(2) + ' walk-forward', fac: '×' + m.categoryEffect.toFixed(2), total: false },
       { term: '= Value if a token launches', expl: 'TVL × ' + effMult.toFixed(2) + '; half of held-out caps fall in ' + money(r.p25_usd) + '–' + money(r.p75_usd), fac: money(r.value_if_launches_usd), total: true },
-      { term: 'Token odds', expl: 'peers by age, category and growth: ' + Math.round(r.token_odds * 100) + '% record a token by this age. Brier ' + st.brier + ' vs ' + st.base_brier + ' base rate.', fac: '×' + r.token_odds.toFixed(2), total: false },
+      { term: 'Token odds', expl: 'logistic on the peers\u2019 record (age, category, growth, size, chains): ' + Math.round(r.token_odds * 100) + '% of peers like this one record a token. Brier ' + st.brier + ' vs ' + st.base_brier + ' base rate; leave-one-out ' + st.odds_loo_brier + ' vs ' + st.odds_loo_base_brier + ', walk-forward ' + st.odds_wf_brier + ' vs ' + st.odds_wf_base_brier + '.', fac: '×' + r.token_odds.toFixed(2), total: false },
       { term: '= Implied value', expl: 'P25–P75 ' + money(r.p25_usd) + '–' + money(r.p75_usd) + '. P10–P90 ' + money(r.p10_usd) + '–' + money(r.p90_usd) + '. Rank ' + r.rank_lo + '–' + r.rank_hi + ' across 200 bootstrap refits.', fac: moneyFull(r.implied_value_usd), total: true }
     ];
     var howHtml = howRows.map(function (h) {

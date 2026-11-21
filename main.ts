@@ -1,4 +1,4 @@
-// Token Radar — entrypoint (revision 5, Node 22, standard library only).
+// Token Radar — entrypoint (revision 6, Node 22, standard library only).
 //
 // Reads the sealed snapshot, fits the comps model on its tokenized
 // protocols, ranks every pre-token protocol by the fitted implied value,
@@ -6,8 +6,11 @@
 // output directory, and writes dossier.json with the vendored make.fun
 // library. Deterministic: no clock, no randomness, no network.
 //
-// Revision 5 is appearance-only (kiencx layout): the dashboard must
-// carry the "Launch Radar" title and the FARM-tab filter line, and every
+// Revision 6 is the 40/40 watchlist fix: the default board keeps every
+// watchlist protocol whatever its category, and the token odds are a
+// logistic fit (age, category, growth, size, chains) validated by
+// leave-one-out and walk-forward Brier. The dashboard must carry the
+// "Launch Radar" title and the FARM-tab filter line, and every
 // screenshot must be exactly 1440x900 so the board shows 13 full rows
 // and the detail shows farm-plan steps 1-9 with no mid-line cut.
 //
@@ -50,18 +53,29 @@ if (issue !== null) {
   process.exit(1);
 }
 
-// The default board is DeFi-only: refuse a build whose filter kept
-// everything or nothing, whose verdicts do not add up, or whose rows
-// let a non-DeFi family back in under a renamed category (a future
-// snapshot spelling 'CEX' or 'Bridge' differently must not put an
-// exchange back on top of the board the reader opens on).
+// The default board is the DeFi rows plus every watchlist row:
+// refuse a build whose filter kept everything or nothing, whose
+// verdicts do not add up, whose watchlist is incomplete, or whose
+// rows let a non-DeFi family back in under a renamed category (a
+// future snapshot spelling 'CEX' or 'Bridge' differently must not
+// put an exchange back on top of the board the reader opens on).
+// A watchlist row is exempt from the renamed-category check: the
+// watchlist exception is the rule, not a leak.
 const defSummary = defaultBoardSummary(board, snapshot.watchlist.length);
+if (defSummary.watchlist_in_default !== defSummary.watchlist_size) {
+  process.stderr.write(`token radar: default board holds ${defSummary.watchlist_in_default} of ${defSummary.watchlist_size} watchlist protocols: the watchlist exception did not keep them all\n`);
+  process.exit(1);
+}
+if (defSummary.excluded_groups.reduce((sum, g) => sum + g.count, 0) !== defSummary.excluded_count) {
+  process.stderr.write(`token radar: default board excluded groups add up to ${defSummary.excluded_groups.reduce((sum, g) => sum + g.count, 0)}, not ${defSummary.excluded_count} rows\n`);
+  process.exit(1);
+}
 if (defSummary.board_size === 0 || defSummary.board_size >= board.length) {
-  process.stderr.write(`token radar: default DeFi board holds ${defSummary.board_size} of ${board.length} rows: the exclusion rule filtered everything or nothing\n`);
+  process.stderr.write(`token radar: default board holds ${defSummary.board_size} of ${board.length} rows: the exclusion rule filtered everything or nothing\n`);
   process.exit(1);
 }
 if (defSummary.board_size * 2 < board.length) {
-  process.stderr.write(`token radar: default DeFi board holds ${defSummary.board_size} of ${board.length} rows: the rule cut more than half the board\n`);
+  process.stderr.write(`token radar: default board holds ${defSummary.board_size} of ${board.length} rows: the rule cut more than half the board\n`);
   process.exit(1);
 }
 if (defSummary.farm_count + defSummary.marginal_count + defSummary.skip_count !== defSummary.board_size) {
@@ -70,6 +84,7 @@ if (defSummary.farm_count + defSummary.marginal_count + defSummary.skip_count !=
 }
 const defRows = board.filter((r) => isDefaultBoardRow(r));
 const slipped = defRows.filter((r) => {
+  if (r.watchlist) return false;
   const c = (r.category ?? '').toLowerCase();
   return c.includes('cex') || c.includes('bridge') || c.includes('wrapper') || c === 'chain';
 });
@@ -198,9 +213,9 @@ process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored\n` +
     `token radar: comps fit on ${fit.comps} tokenized protocols, global median mcap/TVL ${fit.globalMedian.toFixed(4)}, log-log slope ${fit.logLogSlope.toFixed(4)}, R2 ${fit.logLogR2.toFixed(3)}\n` +
     `token radar: kept value terms: ${fit.keptStages.join(', ') || 'flat baseline only'}; LOO miss x${st.loo_miss} vs x${st.flat_loo_miss} flat, walk-forward x${st.wf_miss} vs x${st.flat_wf_miss} flat\n` +
-    `token radar: token odds Brier ${st.brier} vs ${st.base_brier} base rate, ${Math.round(st.odds_called_right * 100)}% called right; printed P25-P75 holds ${(st.inside_p25_p75 * 100).toFixed(0)}% of real caps, P10-P90 holds ${(st.inside_p10_p90 * 100).toFixed(0)}%\n` +
+    `token radar: token odds Brier ${st.brier} vs ${st.base_brier} base rate (leave-one-out ${st.odds_loo_brier} vs ${st.odds_loo_base_brier}, walk-forward ${st.odds_wf_brier} vs ${st.odds_wf_base_brier}), ${Math.round(st.odds_called_right * 100)}% called right; printed P25-P75 holds ${(st.inside_p25_p75 * 100).toFixed(0)}% of real caps, P10-P90 holds ${(st.inside_p10_p90 * 100).toFixed(0)}%\n` +
     `token radar: farm verdicts ${farmLine}; board checksum ${st.board_checksum}\n` +
-    `token radar: default DeFi board: ${defSummary.board_size} rows (FARM ${defSummary.farm_count} / MARGINAL ${defSummary.marginal_count} / SKIP ${defSummary.skip_count}), ${defSummary.excluded_count} non-DeFi out, watchlist ${defSummary.watchlist_in_default} of ${defSummary.watchlist_size} in it; top 5: ${defTop}\n` +
+    `token radar: default board: ${defSummary.board_size} rows (FARM ${defSummary.farm_count} / MARGINAL ${defSummary.marginal_count} / SKIP ${defSummary.skip_count}), ${defSummary.excluded_count} non-DeFi out, watchlist ${defSummary.watchlist_in_default} of ${defSummary.watchlist_size} in it; top 5: ${defTop}\n` +
     `token radar: top 5: ${top}\n` +
     `token radar: dossier ${dossierBytes} bytes, dashboard ${dashBytes} bytes; screenshots ${shotLine}\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,

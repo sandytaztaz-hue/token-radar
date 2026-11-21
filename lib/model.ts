@@ -170,6 +170,11 @@ export interface RadarStats {
   brier: number;
   base_brier: number;
   odds_called_right: number;
+  /** Leave-one-out and walk-forward Brier for the final odds model, with base rates. */
+  odds_loo_brier: number;
+  odds_loo_base_brier: number;
+  odds_wf_brier: number;
+  odds_wf_base_brier: number;
   value_terms_kept: number;
   value_terms_total: number;
   odds_terms_kept: number;
@@ -255,7 +260,7 @@ export interface RadarData {
   model_version: string;
   watchlist_size: number;
   board_size: number;
-  /** The default DeFi-only board: the view the dashboard opens on. */
+  /** The default board: DeFi rows plus every watchlist row, the view the dashboard opens on. */
   default_board: DefaultBoardSummary;
   fit: ModelFit;
   stats: RadarStats;
@@ -630,90 +635,75 @@ export function seededRandom(seed: number): () => number {
 
 // ---------------------------------------------------------------- token odds
 //
-// The peers' record, read off the snapshot: among the protocols listed at
-// least A years ago, what share records a token today? That share rises
-// with age (about 55% at half a year, about 79% at three years), so a
-// protocol's odds start at the cohort rate for its own age, then blend
-// toward its category's token share and its 7-day-growth bucket's rate.
-// Each term is kept only when it lowers the 5-fold cross-validated
-// Brier score. It is a record, not a forecast: it says how often peers
-// of this age have a token, never that this one will.
+// The peers' record, read as a logistic regression: among the 758
+// protocols, which ones record a token today? The fit is on the
+// snapshot's own figures — age (log years listed), the category's
+// token rate (shrunk toward the base rate by 20 pseudo-observations,
+// read as a log-odds deviation), 7-day TVL growth, size (log TVL)
+// and chain count — fitted by iteratively reweighted least squares
+// with a ridge penalty of 1 on every slope, so no single feature can
+// run away with the fit. The intercept is unpenalised. Predictions
+// are clamped to [0.05, 0.95]: the record never says never, or
+// always.
+//
+// Feature groups enter by greedy forward selection on a 5-fold
+// cross-validated Brier score (folds by slug hash, so every run
+// agrees): a group is kept only when it lowers the out-of-fold
+// Brier. The reported Brier numbers are the cross-validated ones,
+// and the final model's leave-one-out and walk-forward Brier scores
+// (train on protocols listed before the 18-month cutoff, test on
+// those listed after) are computed the same way and returned
+// alongside, so the page shows the odds model tested the same way
+// the value model is. It is a record, not a forecast: it says how
+// often peers like this one have a token, never that this one will.
+//
+// Revision 6 replaced the bucket-blend odds (Brier 0.232
+// leave-one-out, 0.300 walk-forward) with this logistic: it clears
+// both held-out tests at once (leave-one-out 0.208, walk-forward
+// 0.216 on this snapshot), because the category log-odds carries far
+// more signal for young protocols than a 0.25 blend toward the
+// category rate, and the age curve is continuous instead of five
+// anchors.
 
-const ODDS_ANCHORS = [0.5, 1, 2, 3, 5];
+/** The ridge penalty on the logistic slopes (intercept unpenalised). */
+export const ODDS_RIDGE = 1;
 
-export interface CohortRate {
-  years: number;
-  rate: number;
-  n: number;
-}
+/** The odds feature groups, in the order they are tried. */
+export const ODDS_STAGES = ['age', 'category', 'growth', 'size', 'chains'] as const;
 
-/** The cohort rate at each anchor age, straight from a protocol list. */
-export function cohortRates(protocols: SnapshotProtocol[], asOf: string): CohortRate[] {
-  const asOfMs = Date.parse(`${asOf}T00:00:00Z`);
-  return ODDS_ANCHORS.map((years) => {
-    const cohort = protocols.filter((p) => {
-      if (p.listed_at === null) return false;
-      const ageY = (asOfMs - Date.parse(`${p.listed_at}T00:00:00Z`)) / (365 * DAY_MS);
-      return ageY >= years;
-    });
-    const withToken = cohort.filter((p) => !isPreToken(p)).length;
-    return { years, rate: cohort.length > 0 ? withToken / cohort.length : 0.55, n: cohort.length };
-  });
-}
-
-/** The cohort rate at an age in years, linearly between the anchors. */
-export function cohortRateAt(cohorts: CohortRate[], ageYears: number | null, baseRate: number): number {
-  if (ageYears === null) return baseRate;
-  if (ageYears <= cohorts[0]!.years) return cohorts[0]!.rate;
-  const last = cohorts[cohorts.length - 1]!;
-  if (ageYears >= last.years) return last.rate;
-  for (let i = 1; i < cohorts.length; i++) {
-    if (ageYears <= cohorts[i]!.years) {
-      const a = cohorts[i - 1]!;
-      const b = cohorts[i]!;
-      const t = (ageYears - a.years) / (b.years - a.years);
-      return a.rate + t * (b.rate - a.rate);
-    }
+/** One protocol's odds features under a stage list (intercept first). */
+export function oddsFeatures(
+  p: SnapshotProtocol,
+  stats: { base: number; catRate: (category: string) => number },
+  asOf: string,
+  stages: string[],
+): number[] {
+  const x = [1];
+  if (stages.includes('age')) {
+    const ageYears =
+      p.listed_at === null
+        ? 1
+        : Math.max(0, (Date.parse(`${asOf}T00:00:00Z`) - Date.parse(`${p.listed_at}T00:00:00Z`)) / (365 * DAY_MS));
+    x.push(Math.log1p(Math.min(ageYears, 5)));
   }
-  return last.rate;
+  if (stages.includes('category')) {
+    const logit = (q: number): number => Math.log(q / (1 - q));
+    x.push(logit(stats.catRate(p.category ?? 'Unknown')) - logit(stats.base));
+  }
+  if (stages.includes('growth')) {
+    const g = Math.min(10, Math.max(-0.8, finite(p.change_7d, 0) / 100));
+    x.push(0.25 * Math.log(1 + g));
+  }
+  if (stages.includes('size')) x.push(Math.max(-2, Math.min(2, Math.log10(p.tvl_usd / 1e8))));
+  if (stages.includes('chains')) x.push((Math.min(p.chains.length, 9) - 1) / 8);
+  return x;
 }
 
-/** One bucket's token rate, for the growth and size odds terms. */
-interface OddsBucket {
-  lo: number;
-  hi: number;
-  rate: number;
-}
-
-export interface OddsModel {
+/** The category token rates behind the category feature, shrunk to base. */
+export function oddsCategoryStats(protocols: SnapshotProtocol[]): {
   base: number;
-  cohorts: CohortRate[];
-  byCategory: Map<string, { n: number; withToken: number }>;
-  growthBuckets: OddsBucket[];
-  sizeBuckets: OddsBucket[];
-}
-
-const GROWTH_BUCKETS: [number, number][] = [[-100, -10], [-10, 0], [0, 10], [10, 50], [50, 1e9]];
-const SIZE_BUCKETS: [number, number][] = [[5e6, 5e7], [5e7, 1e8], [1e8, 1e9], [1e9, 1e10], [1e10, 1e12]];
-
-function bucketRates(
-  protocols: SnapshotProtocol[],
-  ranges: [number, number][],
-  valueOf: (p: SnapshotProtocol) => number | null,
-  base: number,
-): OddsBucket[] {
-  return ranges.map(([lo, hi]) => {
-    const cohort = protocols.filter((p) => {
-      const v = valueOf(p);
-      return v !== null && v >= lo && v < hi;
-    });
-    const withToken = cohort.filter((p) => !isPreToken(p)).length;
-    return { lo, hi, rate: cohort.length > 0 ? withToken / cohort.length : base };
-  });
-}
-
-/** Fit the odds model on a protocol list: base rate, cohorts, buckets. */
-export function fitOddsModel(protocols: SnapshotProtocol[], asOf: string): OddsModel {
+  catRate: (category: string) => number;
+} {
   const base = protocols.filter((p) => !isPreToken(p)).length / protocols.length;
   const byCategory = new Map<string, { n: number; withToken: number }>();
   for (const p of protocols) {
@@ -725,45 +715,100 @@ export function fitOddsModel(protocols: SnapshotProtocol[], asOf: string): OddsM
   }
   return {
     base,
-    cohorts: cohortRates(protocols, asOf),
-    byCategory,
-    growthBuckets: bucketRates(protocols, GROWTH_BUCKETS, (p) => p.change_7d, base),
-    sizeBuckets: bucketRates(protocols, SIZE_BUCKETS, (p) => p.tvl_usd, base),
+    catRate: (category: string): number => {
+      const e = byCategory.get(category);
+      if (e === undefined) return base;
+      return (e.withToken + 20 * base) / (e.n + 20);
+    },
   };
 }
 
-function bucketRateAt(buckets: OddsBucket[], value: number | null, base: number): number {
-  if (value === null) return base;
-  const b = buckets.find((x) => value >= x.lo && value < x.hi);
-  return b === undefined ? base : b.rate;
+/** A fitted logistic odds model: slopes, category stats, stages. */
+export interface LogisticOddsModel {
+  beta: number[];
+  stats: { base: number; catRate: (category: string) => number };
+  stages: string[];
 }
 
-/** One protocol's token odds under an odds model and a stage list. */
-export function predictOdds(model: OddsModel, p: SnapshotProtocol, asOf: string, stages: string[]): number {
-  let o = model.base;
-  if (stages.includes('age')) {
-    const ageYears =
-      p.listed_at === null ? null : (Date.parse(`${asOf}T00:00:00Z`) - Date.parse(`${p.listed_at}T00:00:00Z`)) / (365 * DAY_MS);
-    o = cohortRateAt(model.cohorts, ageYears, model.base);
+/**
+ * Fit the logistic odds model on a protocol list by iteratively
+ * reweighted least squares (Newton steps on the log-loss, ridge
+ * penalty ODDS_RIDGE on the slopes). Deterministic: fixed start,
+ * fixed iteration cap, no randomness.
+ */
+export function fitLogisticOdds(
+  protocols: SnapshotProtocol[],
+  asOf: string,
+  stages: string[],
+): LogisticOddsModel {
+  const stats = oddsCategoryStats(protocols);
+  const xs = protocols.map((p) => oddsFeatures(p, stats, asOf, stages));
+  const ys = protocols.map((p) => (isPreToken(p) ? 0 : 1));
+  const k = xs[0]!.length;
+  const beta = new Array<number>(k).fill(0);
+  beta[0] = Math.log(stats.base / (1 - stats.base));
+  for (let it = 0; it < 25; it++) {
+    const grad = new Array<number>(k).fill(0);
+    const hess: number[][] = Array.from({ length: k }, () => new Array<number>(k).fill(0));
+    for (let i = 0; i < xs.length; i++) {
+      const xi = xs[i]!;
+      let z = 0;
+      for (let j = 0; j < k; j++) z += beta[j]! * xi[j]!;
+      const pr = 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))));
+      const resid = ys[i]! - pr;
+      const w = pr * (1 - pr);
+      for (let a = 0; a < k; a++) {
+        grad[a]! += xi[a]! * resid;
+        for (let b = 0; b < k; b++) hess[a]![b]! += xi[a]! * xi[b]! * w;
+      }
+    }
+    for (let a = 1; a < k; a++) {
+      grad[a]! -= ODDS_RIDGE * beta[a]!;
+      hess[a]![a]! += ODDS_RIDGE;
+    }
+    // Solve hess * step = grad by Gauss-Jordan with partial pivoting.
+    const aug = hess.map((row, i) => [...row, grad[i]!]);
+    for (let c = 0; c < k; c++) {
+      let piv = c;
+      for (let r = c + 1; r < k; r++) if (Math.abs(aug[r]![c]!) > Math.abs(aug[piv]![c]!)) piv = r;
+      const tmp = aug[c]!;
+      aug[c] = aug[piv]!;
+      aug[piv] = tmp;
+      const d = aug[c]![c]!;
+      if (Math.abs(d) < 1e-12) continue;
+      for (let r = 0; r < k; r++) {
+        if (r === c) continue;
+        const f = aug[r]![c]! / d;
+        for (let cc = c; cc <= k; cc++) aug[r]![cc]! -= f * aug[c]![cc]!;
+      }
+    }
+    let maxStep = 0;
+    for (let j = 0; j < k; j++) {
+      const step = aug[j]![k]! / (Math.abs(aug[j]![j]!) < 1e-12 ? 1 : aug[j]![j]!);
+      beta[j]! += step;
+      maxStep = Math.max(maxStep, Math.abs(step));
+    }
+    if (maxStep < 1e-6) break;
   }
-  if (stages.includes('category')) {
-    const cat = model.byCategory.get(p.category ?? 'Unknown');
-    if (cat !== undefined && cat.n >= 20) o = 0.75 * o + 0.25 * (cat.withToken / cat.n);
-  }
-  if (stages.includes('growth')) o = 0.7 * o + 0.3 * bucketRateAt(model.growthBuckets, p.change_7d, model.base);
-  if (stages.includes('size')) o = 0.7 * o + 0.3 * bucketRateAt(model.sizeBuckets, p.tvl_usd, model.base);
-  return Math.min(0.95, Math.max(0.05, o));
+  return { beta, stats, stages };
 }
 
-/** The odds terms, in the order they are tried. */
-export const ODDS_STAGES = ['age', 'category', 'growth', 'size'] as const;
+/** One protocol's token odds under a fitted logistic odds model. */
+export function predictLogisticOdds(model: LogisticOddsModel, p: SnapshotProtocol, asOf: string): number {
+  const x = oddsFeatures(p, model.stats, asOf, model.stages);
+  let z = 0;
+  for (let j = 0; j < x.length; j++) z += model.beta[j]! * x[j]!;
+  return Math.min(0.95, Math.max(0.05, 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))))));
+}
 
 /**
  * Every protocol's token odds, plus the Brier evidence for each odds
- * term. Terms are picked by greedy forward selection on a 5-fold
- * cross-validated Brier score (folds by slug hash, so every run
- * agrees): a term is kept only when it lowers the out-of-fold Brier.
- * The reported Brier numbers are the cross-validated ones.
+ * feature group. Groups are picked by greedy forward selection on a
+ * 5-fold cross-validated Brier score (folds by slug hash, so every
+ * run agrees): a group is kept only when it lowers the out-of-fold
+ * Brier. The reported Brier numbers are the cross-validated ones;
+ * the final model's leave-one-out and walk-forward Brier scores are
+ * computed the same way and returned alongside.
  */
 export function tokenOddsAll(snapshot: Snapshot): {
   odds: Map<string, number>;
@@ -771,6 +816,10 @@ export function tokenOddsAll(snapshot: Snapshot): {
   brier: number;
   baseBrier: number;
   calledRight: number;
+  looBrier: number;
+  looBaseBrier: number;
+  wfBrier: number;
+  wfBaseBrier: number;
 } {
   const cvBrier = (stages: string[]): { brier: number; calledRight: number } => {
     let sq = 0;
@@ -779,12 +828,12 @@ export function tokenOddsAll(snapshot: Snapshot): {
     for (let f = 0; f < 5; f++) {
       const train = snapshot.protocols.filter((p) => Number.parseInt(fnv1aHex(p.slug), 16) % 5 !== f);
       const test = snapshot.protocols.filter((p) => Number.parseInt(fnv1aHex(p.slug), 16) % 5 === f);
-      const model = fitOddsModel(train, snapshot.as_of);
+      const model = fitLogisticOdds(train, snapshot.as_of, stages);
       for (const p of test) {
-        const pr = predictOdds(model, p, snapshot.as_of, stages);
-        const y = isPreToken(p) ? 0 : 1;
-        sq += (pr - y) * (pr - y);
-        if ((pr >= 0.5) === (y === 1)) right += 1;
+        const pr = predictLogisticOdds(model, p, snapshot.as_of);
+        const yv = isPreToken(p) ? 0 : 1;
+        sq += (pr - yv) * (pr - yv);
+        if ((pr >= 0.5) === (yv === 1)) right += 1;
         n += 1;
       }
     }
@@ -804,10 +853,73 @@ export function tokenOddsAll(snapshot: Snapshot): {
       cur = trial;
     }
   }
-  const full = fitOddsModel(snapshot.protocols, snapshot.as_of);
+  // Leave-one-out and walk-forward Brier for the final kept model,
+  // each against its own constant-base-rate score on the same rows.
+  const looBrierOf = (stages: string[]): number => {
+    let sq = 0;
+    for (let i = 0; i < snapshot.protocols.length; i++) {
+      const train = snapshot.protocols.filter((_, j) => j !== i);
+      const model = fitLogisticOdds(train, snapshot.as_of, stages);
+      const pr = predictLogisticOdds(model, snapshot.protocols[i]!, snapshot.as_of);
+      const yv = isPreToken(snapshot.protocols[i]!) ? 0 : 1;
+      sq += (pr - yv) * (pr - yv);
+    }
+    return sq / snapshot.protocols.length;
+  };
+  const wfCutoff = Date.parse(`${snapshot.as_of}T00:00:00Z`) - 540 * DAY_MS;
+  const wfTrain = snapshot.protocols.filter((p) => p.listed_at !== null && Date.parse(`${p.listed_at}T00:00:00Z`) < wfCutoff);
+  const wfTest = snapshot.protocols.filter((p) => p.listed_at !== null && Date.parse(`${p.listed_at}T00:00:00Z`) >= wfCutoff);
+  const wfBrierOf = (stages: string[]): number => {
+    if (wfTrain.length < 10 || wfTest.length < 3) return Number.NaN;
+    const model = fitLogisticOdds(wfTrain, snapshot.as_of, stages);
+    let sq = 0;
+    for (const p of wfTest) {
+      const pr = predictLogisticOdds(model, p, snapshot.as_of);
+      const yv = isPreToken(p) ? 0 : 1;
+      sq += (pr - yv) * (pr - yv);
+    }
+    return sq / wfTest.length;
+  };
+  // The base-rate scores the same way: the constant predictor refit
+  // on the training rows of each test (the other 757 rows for
+  // leave-one-out, the pre-cutoff rows for walk-forward), so the
+  // comparison is against what the base rate knew at the time.
+  const looBaseBrier = (() => {
+    let sq = 0;
+    for (let i = 0; i < snapshot.protocols.length; i++) {
+      const train = snapshot.protocols.filter((_, j) => j !== i);
+      const base = train.filter((p) => !isPreToken(p)).length / train.length;
+      const yv = isPreToken(snapshot.protocols[i]!) ? 0 : 1;
+      sq += (base - yv) * (base - yv);
+    }
+    return sq / snapshot.protocols.length;
+  })();
+  const wfBaseBrier = (() => {
+    if (wfTrain.length < 10 || wfTest.length < 3) return Number.NaN;
+    const base = wfTrain.filter((p) => !isPreToken(p)).length / wfTrain.length;
+    let sq = 0;
+    for (const p of wfTest) {
+      const yv = isPreToken(p) ? 0 : 1;
+      sq += (base - yv) * (base - yv);
+    }
+    return sq / wfTest.length;
+  })();
+  const looBrier = looBrierOf(kept);
+  const wfBrier = wfBrierOf(kept);
+  const full = fitLogisticOdds(snapshot.protocols, snapshot.as_of, kept);
   const odds = new Map<string, number>();
-  for (const p of snapshot.protocols) odds.set(p.slug, predictOdds(full, p, snapshot.as_of, kept));
-  return { odds, terms, brier: cur.brier, baseBrier, calledRight: cur.calledRight };
+  for (const p of snapshot.protocols) odds.set(p.slug, predictLogisticOdds(full, p, snapshot.as_of));
+  return {
+    odds,
+    terms,
+    brier: cur.brier,
+    baseBrier,
+    calledRight: cur.calledRight,
+    looBrier: round4(looBrier),
+    looBaseBrier: round4(looBaseBrier),
+    wfBrier: round4(wfBrier),
+    wfBaseBrier: round4(wfBaseBrier),
+  };
 }
 
 // ---------------------------------------------------------------- bootstrap
@@ -974,17 +1086,21 @@ export function protocolAccounting(snapshot: Snapshot): Accounting {
 
 // ---------------------------------------------------------------- default board
 //
-// The board's DEFAULT view is DeFi-only: the full 342-row board is kept
-// in board.json / data.js, but the rows the board opens on are the DeFi
-// protocols. Centralised exchanges, bridges, liquid-staking receipt
-// tokens, chains and wrapped/issued claims on another asset are not
-// farmable DeFi apps — they sit at the top of the unfiltered board on
-// TVL alone (Bybit, Bitfinex, Robinhood) with blank SKIP verdicts, while
-// the DeFi rows carry the FARM / MARGINAL badges. The rule is by
-// CATEGORY, never by name: no protocol is named here. It mirrors the
-// top-ranked board's own "Out:" groups (exchange 42, bridge 43, liquid
-// staking 41, chain 5, wrapped or issued 14); on this snapshot it
-// excludes 144 rows and leaves a 198-row default board.
+// The board's DEFAULT view is the DeFi protocols plus the watchlist:
+// the full 342-row board is kept in board.json / data.js, but the
+// rows the board opens on are the DeFi protocols and every watchlist
+// protocol, whatever its category. Centralised exchanges, bridges,
+// liquid-staking receipt tokens, chains and wrapped/issued claims on
+// another asset are not farmable DeFi apps — they sit at the top of
+// the unfiltered board on TVL alone (Bybit, Bitfinex, Robinhood)
+// with blank SKIP verdicts, while the DeFi rows carry the FARM /
+// MARGINAL badges. The rule is by CATEGORY, never by name: no
+// protocol is named here — except for one named exception, the
+// watchlist itself. The watchlist is the reader's chosen 40, and a
+// radar that drops 4 of them is not a radar for those 40, so a
+// watchlist row is always ranked, whatever its category. On this
+// snapshot the rule excludes 140 rows and leaves a 202-row default
+// board with all 40 watchlist protocols in it.
 
 /** One excluded group: the categories it covers and why they are out. */
 export interface ExcludedGroup {
@@ -1026,9 +1142,10 @@ export const DEFAULT_BOARD_EXCLUDED_CATEGORIES: ReadonlySet<string> = new Set(
   DEFAULT_BOARD_EXCLUDED_GROUPS.flatMap((g) => g.categories),
 );
 
-/** A board row is in the default DeFi-only view. */
-export function isDefaultBoardRow(row: { category: string | null }): boolean {
-  return row.category === null || !DEFAULT_BOARD_EXCLUDED_CATEGORIES.has(row.category);
+/** A board row is in the default view: in unless its category is
+ * excluded — except a watchlist row, which is always in. */
+export function isDefaultBoardRow(row: { category: string | null; watchlist: boolean }): boolean {
+  return row.watchlist || row.category === null || !DEFAULT_BOARD_EXCLUDED_CATEGORIES.has(row.category);
 }
 
 /** The default board, honestly recomputed: counts, verdicts and totals. */
@@ -1045,7 +1162,10 @@ export interface DefaultBoardSummary {
   watchlist_size: number;
 }
 
-/** Summarise the default DeFi-only board from the full ranked board. */
+/** Summarise the default board from the full ranked board. The
+ * excluded-group counts count only rows the rule actually leaves
+ * out — a watchlist row in an excluded category is kept, so it is
+ * not counted as excluded. */
 export function defaultBoardSummary(board: BoardRow[], watchlistSize: number): DefaultBoardSummary {
   const kept = board.filter((r) => isDefaultBoardRow(r));
   return {
@@ -1054,7 +1174,7 @@ export function defaultBoardSummary(board: BoardRow[], watchlistSize: number): D
     excluded_groups: DEFAULT_BOARD_EXCLUDED_GROUPS.map((g) => ({
       group: g.group,
       categories: g.categories,
-      count: board.filter((r) => r.category !== null && g.categories.includes(r.category)).length,
+      count: board.filter((r) => !isDefaultBoardRow(r) && r.category !== null && g.categories.includes(r.category)).length,
     })),
     excluded_categories: [...DEFAULT_BOARD_EXCLUDED_CATEGORIES].sort(),
     farm_count: kept.filter((r) => r.verdict === 'FARM').length,
@@ -1417,6 +1537,10 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     brier: round4(oddsData.brier),
     base_brier: round4(oddsData.baseBrier),
     odds_called_right: round4(oddsData.calledRight),
+    odds_loo_brier: oddsData.looBrier,
+    odds_loo_base_brier: oddsData.looBaseBrier,
+    odds_wf_brier: oddsData.wfBrier,
+    odds_wf_base_brier: oddsData.wfBaseBrier,
     value_terms_kept: fit.valueTerms.filter((t) => t.kept && t.stage !== 'flat').length,
     value_terms_total: VALUE_STAGES.length,
     odds_terms_kept: oddsData.terms.filter((t) => t.kept).length,
