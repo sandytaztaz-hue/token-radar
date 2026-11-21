@@ -47,10 +47,18 @@
     return '<span class="' + (n > 0 ? 'up' : n < 0 ? 'down' : '') + '">' + s + '</span>';
   }
 
-  var fit = D.fit, st = D.stats, acct = D.accounting;
+  var fit = D.fit, st = D.stats, acct = D.accounting, def = D.default_board;
 
-  /* Header rating strip: 6 coloured panels, one number each. */
-  $('stat-rows').textContent = D.board_size;
+  /* Default board: DeFi only. The full 342-row board stays in D.rows;
+     the board opens on the DeFi rows (def.board_size), each with a
+     stable DeFi rank for the rank column. The watchlist filter below
+     bypasses the scope, so all 40 watchlist rows stay reachable. */
+  var EXCLUDED = new Set(def ? def.excluded_categories : []);
+  var boardRows = rows.filter(function (r) { return !EXCLUDED.has(r.category); });
+  boardRows.forEach(function (r, i) { r._defiRank = i + 1; });
+
+  /* Header rating strip: 6 coloured panels, one number each.
+     The farm panel counts the DEFAULT (DeFi) board, honestly. */
   $('s-miss').textContent = '×' + st.loo_miss + ' vs ×' + st.flat_loo_miss + ' flat';
   $('s-miss-sub').textContent = 'flat misses ×' + st.flat_loo_miss + ' LOO, ×' + st.flat_wf_miss + ' walk-fwd';
   $('s-range').textContent = Math.round(st.inside_p25_p75 * 100) + '% · ' + Math.round(st.inside_p10_p90 * 100) + '%';
@@ -59,21 +67,28 @@
   $('s-odds-sub').textContent = Math.round(st.odds_called_right * 100) + '% called right, vs 55% base rate';
   $('s-terms').textContent = st.value_terms_kept + ' of ' + st.value_terms_total + ' · ' + st.odds_terms_kept + ' of ' + st.odds_terms_total;
   $('s-terms-sub').textContent = 'value · odds terms kept; rest not used';
-  $('s-farm').textContent = st.farm_count + ' of ' + D.board_size;
-  $('s-farm-sub').textContent = st.marginal_count + ' marginal, ' + st.skip_count + ' skip';
+  $('s-farm').textContent = def.farm_count + ' of ' + def.board_size;
+  $('s-farm-sub').textContent = def.marginal_count + ' marginal, ' + def.skip_count + ' skip';
   $('s-watch').textContent = D.watchlist_size + ' / ' + D.watchlist_size;
-  $('s-watch-sub').textContent = 'plus ' + acct.ranked_other + ' pre-token left out';
+  $('s-watch-sub').textContent = def.watchlist_in_default + ' in the DeFi board · ' + def.excluded_count + ' non-DeFi out of it';
 
-  /* Protocol accounting. */
+  /* Protocol accounting: one segmented bar over the whole 758-ledger —
+     DeFi ranked, the five Out groups, priced comps, no usable cap. */
   var total = acct.total;
-  $('acct-note').textContent = 'all ' + total + ' snapshot protocols in exactly one group: ' + D.board_size +
-    ' ranked as pre-token, ' + acct.priced_comps + ' already record a token, ' + acct.token_no_cap + ' left out by the house list\u2019s own rules';
+  $('acct-note').textContent = 'all ' + total + ' snapshot protocols in exactly one group: ' + def.board_size +
+    ' ranked DeFi-only in the default board, ' + def.excluded_count + ' non-DeFi pre-token out of it, ' +
+    acct.priced_comps + ' already record a token, ' + acct.token_no_cap + ' left out by the house list\u2019s own rules';
   var barParts = [
-    { n: acct.ranked_watchlist, cls: 'b-watch', label: 'Ranked · watchlist' },
-    { n: acct.ranked_other, cls: 'b-other', label: 'Ranked · early, below the floor' },
+    { n: def.watchlist_in_default, cls: 'b-watch', label: 'Ranked DeFi · watchlist' },
+    { n: def.board_size - def.watchlist_in_default, cls: 'b-other', label: 'Ranked DeFi · other' }
+  ];
+  def.excluded_groups.forEach(function (g, i) {
+    barParts.push({ n: g.count, cls: 'b-out' + (i + 1), label: 'Out: ' + g.group });
+  });
+  barParts.push(
     { n: acct.priced_comps, cls: 'b-priced', label: 'Token trades · priced comp' },
     { n: acct.token_no_cap, cls: 'b-nocap', label: 'Token recorded · no usable cap' }
-  ];
+  );
   $('acct-bar').innerHTML = barParts.map(function (p) {
     return '<span class="' + p.cls + '" style="width:' + (p.n / total * 100) + '%"></span>';
   }).join('');
@@ -81,22 +96,31 @@
     return '<li><span class="sw ' + p.cls + '"></span>' + p.label + ' <strong>' + p.n + '</strong></li>';
   }).join('');
 
-  /* Integrity chips: checks this page can run itself. */
-  var sortedOk = rows.every(function (r, i) { return r.rank === i + 1; }) &&
-    rows.every(function (r, i) { return i === 0 || r.implied_value_usd <= rows[i - 1].implied_value_usd; });
-  var watchOk = rows.filter(function (r) { return r.watchlist; }).length === D.watchlist_size;
-  var sumOk = rows.reduce(function (a, r) { return a + r.implied_value_usd; }, 0) === st.total_implied_usd;
-  var ledgerOk = acct.ranked_watchlist + acct.ranked_other + acct.priced_comps + acct.token_no_cap === total;
-  var chips = [
-    { ok: sortedOk, text: 'this table = board.json: ' + rows.length + ' of ' + rows.length + ' rows, in order, values never rise' },
-    { ok: sumOk, text: 'totals equal ' + moneyFull(st.total_implied_usd) },
-    { ok: true, text: 'checksum ' + st.board_checksum + ' = board.json' },
-    { ok: watchOk, text: 'watchlist ' + D.watchlist_size + ' of ' + D.watchlist_size + ' ranked' },
-    { ok: ledgerOk, text: 'ledger ' + total + ' of ' + total + ' protocols' }
-  ];
-  $('acct-chips').innerHTML = chips.map(function (c) {
-    return '<li class="' + (c.ok ? 'ok' : 'bad') + '">' + (c.ok ? '✓ ' : '✗ ') + esc(c.text) + '</li>';
-  }).join('');
+  /* Integrity checks, one compact line: recomputed for the view in
+     front of the reader (DeFi board, all pre-token, or watchlist). */
+  function renderChecks() {
+    var view = state.status === 'watchlist' ? rows.filter(function (r) { return r.watchlist; })
+      : state.scope === 'defi' ? boardRows : rows;
+    var viewSize = state.status === 'watchlist' ? D.watchlist_size
+      : state.scope === 'defi' ? def.board_size : D.board_size;
+    var viewTotal = state.status === 'watchlist'
+      ? view.reduce(function (a, r) { return a + r.implied_value_usd; }, 0)
+      : state.scope === 'defi' ? def.total_implied_usd : st.total_implied_usd;
+    var sortedOk = view.every(function (r, i) { return i === 0 || r.implied_value_usd <= view[i - 1].implied_value_usd; });
+    var sumOk = view.reduce(function (a, r) { return a + r.implied_value_usd; }, 0) === viewTotal;
+    var watchOk = rows.filter(function (r) { return r.watchlist; }).length === D.watchlist_size;
+    var ledgerOk = def.board_size + def.excluded_count + acct.priced_comps + acct.token_no_cap === total;
+    var checks = [
+      { ok: sortedOk, text: 'this table = data.js: ' + view.length + ' of ' + viewSize + ' rows, in order, values never rise' },
+      { ok: sumOk, text: 'totals equal ' + moneyFull(viewTotal) },
+      { ok: true, text: 'checksum ' + st.board_checksum + ' = board.json' },
+      { ok: watchOk, text: 'watchlist ' + D.watchlist_size + ' of ' + D.watchlist_size + ' ranked' },
+      { ok: ledgerOk, text: 'ledger ' + total + ' of ' + total + ' protocols' }
+    ];
+    $('acct-checks').innerHTML = checks.map(function (c) {
+      return '<span class="' + (c.ok ? 'ok' : 'bad') + '">' + (c.ok ? '✓ ' : '✗ ') + esc(c.text) + '</span>';
+    }).join(' · ');
+  }
 
   /* Out-of-sample evidence tables. */
   function keptTag(k) { return k ? '<span class="kept">kept</span>' : '<span class="notkept">tested, not kept</span>'; }
@@ -142,17 +166,27 @@
     multBody.appendChild(tr);
   });
 
-  /* Filters. */
-  var cats = [], chains = [];
-  rows.forEach(function (r) {
-    if (r.category && cats.indexOf(r.category) < 0) cats.push(r.category);
-    r.chains.forEach(function (c) { if (chains.indexOf(c) < 0) chains.push(c); });
-  });
-  cats.sort(); chains.sort();
-  cats.forEach(function (c) { $('f-cat').insertAdjacentHTML('beforeend', '<option>' + esc(c) + '</option>'); });
-  chains.forEach(function (c) { $('f-chain').insertAdjacentHTML('beforeend', '<option>' + esc(c) + '</option>'); });
+  /* Filters. The category / chain lists come from the board in view,
+     so the DeFi board never offers an excluded category. */
+  function buildFilterOptions() {
+    var base = state.scope === 'defi' ? boardRows : rows;
+    var cats = [], chains = [];
+    base.forEach(function (r) {
+      if (r.category && cats.indexOf(r.category) < 0) cats.push(r.category);
+      r.chains.forEach(function (c) { if (chains.indexOf(c) < 0) chains.push(c); });
+    });
+    cats.sort(); chains.sort();
+    var catSel = $('f-cat'), chainSel = $('f-chain');
+    catSel.innerHTML = '<option value="">All categories</option>';
+    chainSel.innerHTML = '<option value="">All chains</option>';
+    cats.forEach(function (c) { catSel.insertAdjacentHTML('beforeend', '<option>' + esc(c) + '</option>'); });
+    chains.forEach(function (c) { chainSel.insertAdjacentHTML('beforeend', '<option>' + esc(c) + '</option>'); });
+    if (cats.indexOf(state.cat) < 0) state.cat = '';
+    if (chains.indexOf(state.chain) < 0) state.chain = '';
+    catSel.value = state.cat; chainSel.value = state.chain;
+  }
 
-  var state = { q: '', cat: '', chain: '', status: '', sort: 'value', dir: -1 };
+  var state = { q: '', cat: '', chain: '', status: '', sort: 'value', dir: -1, scope: 'defi' };
   var verdictRank = { FARM: 0, MARGINAL: 1, SKIP: 2 };
   var sortFns = {
     rank: function (a, b) { return a.rank - b.rank; },
@@ -170,7 +204,13 @@
 
   function filtered() {
     var q = state.q.toLowerCase();
-    return rows.filter(function (r) {
+    /* The board in view: DeFi only by default, all pre-token on ask.
+       The watchlist filter bypasses the scope — all 40 watchlist rows
+       stay reachable, including the 4 whose category is out of the
+       default board. */
+    var base = state.status === 'watchlist' ? rows.filter(function (r) { return r.watchlist; })
+      : state.scope === 'defi' ? boardRows : rows;
+    return base.filter(function (r) {
       if (state.cat && r.category !== state.cat) return false;
       if (state.chain && r.chains.indexOf(state.chain) < 0) return false;
       if (state.status === 'watchlist' && !r.watchlist) return false;
@@ -183,11 +223,16 @@
   var tbody = document.querySelector('#board tbody');
   function render() {
     var list = filtered();
-    $('count').textContent = list.length + ' of ' + rows.length + ' protocols';
+    var baseN = state.status === 'watchlist' ? D.watchlist_size : state.scope === 'defi' ? def.board_size : D.board_size;
+    var baseWord = state.status === 'watchlist' ? 'watchlist' : state.scope === 'defi' ? 'DeFi' : 'pre-token';
+    $('count').textContent = list.length + ' of ' + baseN + ' ' + baseWord + ' protocols';
     $('empty').hidden = list.length > 0;
     tbody.innerHTML = list.map(function (r) {
+      /* Rank column: the DeFi rank in the default board, the model rank
+         everywhere else (all pre-token, or the watchlist view). */
+      var rankCell = state.status === 'watchlist' ? r.rank : state.scope === 'defi' ? r._defiRank : r.rank;
       return '<tr data-slug="' + esc(r.slug) + '">' +
-        '<td class="num">' + r.rank + '</td>' +
+        '<td class="num">' + rankCell + '</td>' +
         '<td class="name">' + esc(r.name) + (r.watchlist ? '<span class="badge">WATCHLIST</span>' : '') + '</td>' +
         '<td class="num">' + money(r.tvl_usd) + '</td>' +
         '<td class="num">' + pct(r.change_7d) + '</td>' +
@@ -199,6 +244,7 @@
         '<td>' + verdictBadge(r.verdict) + '</td>' +
         '<td class="num">' + netCell(r.net_per_hour_usd) + '</td></tr>';
     }).join('');
+    renderChecks();
   }
 
   tbody.addEventListener('click', function (e) {
@@ -213,6 +259,7 @@
     });
   });
   $('q').addEventListener('input', function () { state.q = $('q').value; render(); });
+  $('f-scope').addEventListener('change', function () { state.scope = $('f-scope').value; buildFilterOptions(); render(); });
   $('f-cat').addEventListener('change', function () { state.cat = $('f-cat').value; render(); });
   $('f-chain').addEventListener('change', function () { state.chain = $('f-chain').value; render(); });
   $('f-status').addEventListener('change', function () { state.status = $('f-status').value; render(); });
@@ -296,7 +343,7 @@
       '<p class="crumb"><a href="#board" id="back-board">← Board</a> / ' + esc(r.name) + '</p>' +
       '<div class="d-head">' +
       '<div class="detail-head">' +
-      '<p class="rankline">#' + r.rank + ' of ' + rows.length + ' by implied value · rank ' + r.rank_lo + '–' + r.rank_hi + ' across 200 bootstrap refits</p>' +
+      '<p class="rankline">#' + (r._defiRank || r.rank) + ' of ' + (r._defiRank ? def.board_size : rows.length) + ' by implied value' + (r._defiRank ? ' · rank ' + r.rank + ' of ' + rows.length + ' in the full pre-token board' : '') + ' · rank ' + r.rank_lo + '–' + r.rank_hi + ' across 200 bootstrap refits</p>' +
       '<h3>' + esc(r.name) + (r.watchlist ? '<span class="badge">WATCHLIST</span>' : '') + ' ' + verdictBadge(r.verdict) + '</h3>' +
       '<p class="sub">' + esc(r.category || 'Uncategorised') + ' · Chains: ' + esc(r.chains.slice(0, 6).join(', ') || '—') +
       (r.chains.length > 6 ? ' +' + (r.chains.length - 6) + ' more' : '') + ' · Listed ' + esc(r.listed_at || 'date unknown') + '</p>' +
@@ -382,12 +429,14 @@
     liveBody.appendChild(tr);
   });
 
-  /* Deep links for screenshots: #detail=slug, #cat=Dexs, #chain=Ethereum, #watchlist=1, #farm=1. */
+  /* Deep links for screenshots: #detail=slug, #cat=Dexs, #chain=Ethereum, #watchlist=1, #farm=1, #scope=all. */
   var hash = new URLSearchParams(location.hash.slice(1));
-  if (hash.get('cat')) { state.cat = hash.get('cat'); $('f-cat').value = state.cat; }
-  if (hash.get('chain')) { state.chain = hash.get('chain'); $('f-chain').value = state.chain; }
+  if (hash.get('scope')) { state.scope = hash.get('scope') === 'all' ? 'all' : 'defi'; $('f-scope').value = state.scope; }
+  if (hash.get('cat')) { state.cat = hash.get('cat'); }
+  if (hash.get('chain')) { state.chain = hash.get('chain'); }
   if (hash.get('watchlist')) { state.status = 'watchlist'; $('f-status').value = 'watchlist'; }
   if (hash.get('farm')) { state.status = 'farm'; $('f-status').value = 'farm'; }
+  buildFilterOptions();
   render();
   if (hash.get('detail')) showDetail(hash.get('detail'));
 })();

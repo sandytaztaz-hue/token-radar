@@ -255,6 +255,8 @@ export interface RadarData {
   model_version: string;
   watchlist_size: number;
   board_size: number;
+  /** The default DeFi-only board: the view the dashboard opens on. */
+  default_board: DefaultBoardSummary;
   fit: ModelFit;
   stats: RadarStats;
   accounting: Accounting;
@@ -970,6 +972,100 @@ export function protocolAccounting(snapshot: Snapshot): Accounting {
   };
 }
 
+// ---------------------------------------------------------------- default board
+//
+// The board's DEFAULT view is DeFi-only: the full 342-row board is kept
+// in board.json / data.js, but the rows the board opens on are the DeFi
+// protocols. Centralised exchanges, bridges, liquid-staking receipt
+// tokens, chains and wrapped/issued claims on another asset are not
+// farmable DeFi apps — they sit at the top of the unfiltered board on
+// TVL alone (Bybit, Bitfinex, Robinhood) with blank SKIP verdicts, while
+// the DeFi rows carry the FARM / MARGINAL badges. The rule is by
+// CATEGORY, never by name: no protocol is named here. It mirrors the
+// top-ranked board's own "Out:" groups (exchange 42, bridge 43, liquid
+// staking 41, chain 5, wrapped or issued 14); on this snapshot it
+// excludes 144 rows and leaves a 198-row default board.
+
+/** One excluded group: the categories it covers and why they are out. */
+export interface ExcludedGroup {
+  group: string;
+  categories: string[];
+  reason: string;
+}
+
+export const DEFAULT_BOARD_EXCLUDED_GROUPS: ExcludedGroup[] = [
+  {
+    group: 'exchange',
+    categories: ['CEX'],
+    reason: 'centralised exchanges, not DeFi protocols — no on-chain app to farm',
+  },
+  {
+    group: 'bridge',
+    categories: ['Bridge', 'Canonical Bridge', 'Cross Chain Bridge'],
+    reason: 'cross-chain transport, not a DeFi app — moving assets is not farming them',
+  },
+  {
+    group: 'liquid staking',
+    categories: ['Liquid Staking', 'Liquid Restaking'],
+    reason: 'issued receipt tokens for staked assets, not a standalone DeFi app',
+  },
+  {
+    group: 'chain',
+    categories: ['Chain'],
+    reason: 'blockchains themselves, not protocols running on one',
+  },
+  {
+    group: 'wrapped or issued',
+    categories: ['Stablecoin Wrapper', 'Anchor BTC', 'CeDeFi', 'Decentralized BTC', 'Restaked BTC', 'Dual-Token Stablecoin'],
+    reason: 'a wrapped or issued claim on another asset, not a standalone DeFi protocol',
+  },
+];
+
+/** Every category the default board leaves out, as one flat set. */
+export const DEFAULT_BOARD_EXCLUDED_CATEGORIES: ReadonlySet<string> = new Set(
+  DEFAULT_BOARD_EXCLUDED_GROUPS.flatMap((g) => g.categories),
+);
+
+/** A board row is in the default DeFi-only view. */
+export function isDefaultBoardRow(row: { category: string | null }): boolean {
+  return row.category === null || !DEFAULT_BOARD_EXCLUDED_CATEGORIES.has(row.category);
+}
+
+/** The default board, honestly recomputed: counts, verdicts and totals. */
+export interface DefaultBoardSummary {
+  board_size: number;
+  excluded_count: number;
+  excluded_groups: { group: string; categories: string[]; count: number }[];
+  excluded_categories: string[];
+  farm_count: number;
+  marginal_count: number;
+  skip_count: number;
+  total_implied_usd: number;
+  watchlist_in_default: number;
+  watchlist_size: number;
+}
+
+/** Summarise the default DeFi-only board from the full ranked board. */
+export function defaultBoardSummary(board: BoardRow[], watchlistSize: number): DefaultBoardSummary {
+  const kept = board.filter((r) => isDefaultBoardRow(r));
+  return {
+    board_size: kept.length,
+    excluded_count: board.length - kept.length,
+    excluded_groups: DEFAULT_BOARD_EXCLUDED_GROUPS.map((g) => ({
+      group: g.group,
+      categories: g.categories,
+      count: board.filter((r) => r.category !== null && g.categories.includes(r.category)).length,
+    })),
+    excluded_categories: [...DEFAULT_BOARD_EXCLUDED_CATEGORIES].sort(),
+    farm_count: kept.filter((r) => r.verdict === 'FARM').length,
+    marginal_count: kept.filter((r) => r.verdict === 'MARGINAL').length,
+    skip_count: kept.filter((r) => r.verdict === 'SKIP').length,
+    total_implied_usd: kept.reduce((sum, r) => sum + r.implied_value_usd, 0),
+    watchlist_in_default: kept.filter((r) => r.watchlist).length,
+    watchlist_size: watchlistSize,
+  };
+}
+
 /** Capital tier for a farm position, from the protocol's own TVL. */
 function capitalFor(p: SnapshotProtocol): number {
   if (p.tvl_usd >= 1_000_000_000) return 10000;
@@ -1351,6 +1447,7 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     model_version: MODEL_VERSION,
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
+    default_board: defaultBoardSummary(board, snapshot.watchlist.length),
     fit,
     stats,
     accounting: protocolAccounting(snapshot),

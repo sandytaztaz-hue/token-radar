@@ -11,7 +11,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
+import { boardIssue, buildRadar, dataScript, defaultBoardSummary, isDefaultBoardRow, parseSnapshot } from './lib/model.ts';
 import { buildDossier } from './vendor/makefun-board.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -45,9 +45,59 @@ if (issue !== null) {
   process.exit(1);
 }
 
+// The default board is DeFi-only: refuse a build whose filter kept
+// everything or nothing, whose verdicts do not add up, or whose rows
+// let a non-DeFi family back in under a renamed category (a future
+// snapshot spelling 'CEX' or 'Bridge' differently must not put an
+// exchange back on top of the board the reader opens on).
+const defSummary = defaultBoardSummary(board, snapshot.watchlist.length);
+if (defSummary.board_size === 0 || defSummary.board_size >= board.length) {
+  process.stderr.write(`token radar: default DeFi board holds ${defSummary.board_size} of ${board.length} rows: the exclusion rule filtered everything or nothing\n`);
+  process.exit(1);
+}
+if (defSummary.board_size * 2 < board.length) {
+  process.stderr.write(`token radar: default DeFi board holds ${defSummary.board_size} of ${board.length} rows: the rule cut more than half the board\n`);
+  process.exit(1);
+}
+if (defSummary.farm_count + defSummary.marginal_count + defSummary.skip_count !== defSummary.board_size) {
+  process.stderr.write(`token radar: default board verdicts do not add up to ${defSummary.board_size} rows\n`);
+  process.exit(1);
+}
+const defRows = board.filter((r) => isDefaultBoardRow(r));
+const slipped = defRows.filter((r) => {
+  const c = (r.category ?? '').toLowerCase();
+  return c.includes('cex') || c.includes('bridge') || c.includes('wrapper') || c === 'chain';
+});
+if (slipped.length > 0) {
+  process.stderr.write(`token radar: default board keeps ${slipped.length} non-DeFi rows under a renamed category: ${slipped.slice(0, 5).map((r) => r.slug).join(', ')}\n`);
+  process.exit(1);
+}
+
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
 writeFileSync(join(out, 'data.js'), dataScript(radar));
+
+// Round-trip: the data.js the dashboard reads must carry the same
+// default-board summary the gate just checked, not a stale copy — and
+// the full 342-row board behind it, so a truncated write cannot ship
+// a dashboard that silently shows fewer rows than board.json holds.
+const shipped = JSON.parse(readFileSync(join(out, 'data.js'), 'utf8').replace(/^window\.RADAR=/, '').replace(/;\n$/, '')) as {
+  default_board?: { board_size?: number; total_implied_usd?: number };
+  rows?: unknown[];
+  board_size?: number;
+  watchlist_size?: number;
+};
+if (
+  shipped.default_board?.board_size !== defSummary.board_size ||
+  shipped.default_board?.total_implied_usd !== defSummary.total_implied_usd ||
+  !Array.isArray(shipped.rows) ||
+  shipped.rows.length !== board.length ||
+  shipped.board_size !== board.length ||
+  shipped.watchlist_size !== snapshot.watchlist.length
+) {
+  process.stderr.write(`token radar: data.js disagrees with the gate: default board ${JSON.stringify(shipped.default_board)}, rows ${Array.isArray(shipped.rows) ? shipped.rows.length : '?'}, board_size ${shipped.board_size}\n`);
+  process.exit(1);
+}
 
 /** Copy one directory's regular files into `to`, skipping dotfiles. */
 function copyFiles(from: string, to: string): string[] {
@@ -120,6 +170,7 @@ if (dossierBytes > 1_572_864) {
 }
 
 const top = board.slice(0, 5).map((r) => `#${r.rank} ${r.slug} $${r.implied_value_usd.toLocaleString('en-US')}`).join(', ');
+const defTop = defRows.slice(0, 5).map((r, i) => `#${i + 1} ${r.slug} ${r.verdict} $${r.implied_value_usd.toLocaleString('en-US')}`).join(', ');
 const st = radar.stats;
 const farmLine = `FARM ${st.farm_count} / MARGINAL ${st.marginal_count} / SKIP ${st.skip_count}`;
 const shotLine = shots.map((n) => `${n} ${statSync(join(out, 'screenshots', n)).size} bytes`).join(', ');
@@ -129,6 +180,7 @@ process.stdout.write(
     `token radar: kept value terms: ${fit.keptStages.join(', ') || 'flat baseline only'}; LOO miss x${st.loo_miss} vs x${st.flat_loo_miss} flat, walk-forward x${st.wf_miss} vs x${st.flat_wf_miss} flat\n` +
     `token radar: token odds Brier ${st.brier} vs ${st.base_brier} base rate, ${Math.round(st.odds_called_right * 100)}% called right; printed P25-P75 holds ${(st.inside_p25_p75 * 100).toFixed(0)}% of real caps, P10-P90 holds ${(st.inside_p10_p90 * 100).toFixed(0)}%\n` +
     `token radar: farm verdicts ${farmLine}; board checksum ${st.board_checksum}\n` +
+    `token radar: default DeFi board: ${defSummary.board_size} rows (FARM ${defSummary.farm_count} / MARGINAL ${defSummary.marginal_count} / SKIP ${defSummary.skip_count}), ${defSummary.excluded_count} non-DeFi out, watchlist ${defSummary.watchlist_in_default} of ${defSummary.watchlist_size} in it; top 5: ${defTop}\n` +
     `token radar: top 5: ${top}\n` +
     `token radar: dossier ${dossierBytes} bytes, dashboard ${dashBytes} bytes; screenshots ${shotLine}\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,

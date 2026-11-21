@@ -8,9 +8,7 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="dot" aria-hidden="true"></span>TOKEN RADAR <span class="src">DeFiLlama snapshot 2026-11-14 · model radar-r2, refitted in this browser</span></div>
-  <h1>Which protocols without a token are worth the most?</h1>
-  <p class="lede">Every protocol in the snapshot that records no token yet — <strong id="stat-rows">342</strong> of them — ranked by the value a token would plausibly have, times the odds a token ever comes. The value is priced from protocols that already have a token, not from a favourite list. Click any row for the full breakdown, the farm verdict and a step-by-step farm plan.</p>
+  <div class="brand"><span class="dot" aria-hidden="true"></span>TOKEN RADAR <span class="src">DeFiLlama snapshot 2026-11-14 · model radar-r2, refitted in this browser · default board: DeFi only, 198 of 342 pre-token protocols</span></div>
   <dl class="stats" id="stats">
     <div class="s1"><dt>Out-of-sample miss, walk-forward</dt><dd id="s-miss">—</dd><dd class="sub" id="s-miss-sub"></dd></div>
     <div class="s2"><dt>Is the printed range honest?</dt><dd id="s-range">—</dd><dd class="sub" id="s-range-sub"></dd></div>
@@ -19,7 +17,6 @@
     <div class="s5"><dt>Worth farming, this scenario</dt><dd id="s-farm">—</dd><dd class="sub" id="s-farm-sub"></dd></div>
     <div class="s6"><dt>Watchlist ranked</dt><dd id="s-watch">—</dd><dd class="sub" id="s-watch-sub"></dd></div>
   </dl>
-  <p class="formula">Implied value = TVL × fitted multiple (the value if a token launches) × token odds (from how long peers ran before recording one). Each coefficient is fitted on this snapshot and tested held-out.</p>
 </header>
 
 <section class="panel acct" aria-labelledby="acct-h">
@@ -27,7 +24,7 @@
   <p class="acct-note" id="acct-note"></p>
   <div class="bar" id="acct-bar" aria-hidden="true"></div>
   <ul class="legend" id="acct-legend"></ul>
-  <ul class="chips" id="acct-chips"></ul>
+  <p class="checks" id="acct-checks"></p>
 </section>
 
 <section class="panel evidence" aria-labelledby="ev-h">
@@ -60,6 +57,7 @@
 </section>
 
 <section class="controls" aria-label="Board controls">
+  <label>Board <select id="f-scope"><option value="defi">DeFi only</option><option value="all">All pre-token</option></select></label>
   <label>Search <input id="q" type="search" placeholder="Protocol or category name" autocomplete="off"></label>
   <label>Category <select id="f-cat"><option value="">All categories</option></select></label>
   <label>Chain <select id="f-chain"><option value="">All chains</option></select></label>
