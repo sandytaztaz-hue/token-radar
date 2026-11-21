@@ -1,141 +1,76 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar — every pre-token protocol, ranked by implied value</title>
-<link rel="stylesheet" href="app.css">
-</head>
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Launch Radar — pre-token protocols, valued from their own record</title>
+<link rel="stylesheet" href="app.css"></head>
 <body>
-<header class="top">
-  <div class="top-head">
-    <div class="brand"><h1>Launch Radar</h1><p class="sub">pre-token protocols, valued from their own record</p></div>
-    <p class="src">DeFiLlama snapshot <b>2026-11-14</b> · model <b>radar-r2</b>, refitted in this browser</p>
-  </div>
-  <dl class="stats" id="stats">
-    <div class="s1"><dt>Out-of-sample miss, walk-forward</dt><dd id="s-miss">—</dd><dd class="sub" id="s-miss-sub"></dd></div>
-    <div class="s2"><dt>Is the printed range honest?</dt><dd id="s-range">—</dd><dd class="sub" id="s-range-sub"></dd></div>
-    <div class="s3"><dt>Token odds vs base rate, Brier</dt><dd id="s-odds">—</dd><dd class="sub" id="s-odds-sub"></dd></div>
-    <div class="s4"><dt>Terms that survived both tests</dt><dd id="s-terms">—</dd><dd class="sub" id="s-terms-sub"></dd></div>
-    <div class="s5"><dt>Worth farming, this scenario</dt><dd id="s-farm">—</dd><dd class="sub" id="s-farm-sub"></dd></div>
-    <div class="s6"><dt>Watchlist ranked</dt><dd id="s-watch">—</dd><dd class="sub" id="s-watch-sub"></dd></div>
-  </dl>
-  <p class="oneliner">Implied value = TVL × fitted multiple (the value if a token launches) × token odds (from how long peers ran before recording one). Each coefficient is fitted on this snapshot and tested held-out.</p>
+<div id="page">
+<header>
+  <div><h1>Launch Radar</h1><p class="sub">pre-token protocols, valued from their own record</p></div>
+  <div class="meta" id="headMeta">DeFiLlama snapshot 2026-11-14 · model radar-r7, refitted in this browser</div>
 </header>
 
-<section class="panel acct" aria-labelledby="acct-h">
-  <h2 id="acct-h">PROTOCOL ACCOUNTING</h2>
-  <p class="acct-note" id="acct-note"></p>
-  <div class="bar" id="acct-bar" aria-hidden="true"></div>
-  <ul class="legend" id="acct-legend"></ul>
-  <p class="checks" id="acct-checks"></p>
+<section id="strip" aria-label="rating strip"></section>
+<p class="oneline">Implied value = TVL × fitted multiple (the value if a token launches) × token odds (from how long peers ran before recording one). Each coefficient is fitted on this snapshot and tested held-out.</p>
+
+<section class="panel" id="accounting">
+  <h2>PROTOCOL ACCOUNTING</h2>
+  <p id="acctLine" class="acct"></p>
+  <div id="acctBar" class="bar"></div>
+  <p id="acctLegend" class="legend"></p>
+  <p id="integrity" class="ok"></p>
 </section>
 
-<section class="panel evidence" aria-labelledby="ev-h">
-  <h2 id="ev-h">OUT-OF-SAMPLE EVIDENCE</h2>
-  <p class="note">A term is kept only if it lowers the held-out miss in both tests: leave-one-out, and walk-forward (protocols listed earlier price those listed later).</p>
-  <div class="ev-grid">
-    <div>
-      <h3>Value if a token launches — typical miss, 128 traded tokens</h3>
-      <table class="mini" id="ev-value">
-        <thead><tr><th scope="col">Term, added in order</th><th scope="col" class="num">Leave-one-out</th><th scope="col" class="num">Walk-forward</th><th scope="col"></th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <div>
-      <h3>Token odds — Brier score (share called right), 758 protocols</h3>
-      <table class="mini" id="ev-odds">
-        <thead><tr><th scope="col">Term, added in order</th><th scope="col" class="num">5-fold Brier</th><th scope="col" class="num">Called right</th><th scope="col"></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p class="note" id="ev-odds-wf"></p>
-    </div>
-    <div>
-      <h3>Is the printed range honest?</h3>
-      <table class="mini" id="ev-range">
-        <thead><tr><th scope="col">Share of real caps</th><th scope="col" class="num">Leave-one-out</th><th scope="col" class="num">Walk-forward</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p class="note" id="ev-boot"></p>
-    </div>
+<section class="panel" id="evidence">
+  <h2>OUT-OF-SAMPLE EVIDENCE</h2>
+  <p class="evsub">A term is kept only if it lowers the held-out miss in both tests: leave-one-out, and walk-forward (earlier listings price later ones).</p>
+  <div class="evgrid">
+    <div><h3>Value if a token launches — typical miss, 128 traded tokens</h3><table id="evMult"><thead><tr><th>TERM, ADDED IN ORDER</th><th>LEAVE-ONE-OUT</th><th>WALK-FORWARD</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div><h3>Token odds — Brier score (share called right), 758 protocols</h3><table id="evOdds"><thead><tr><th>TERM, ADDED IN ORDER</th><th>5-FOLD BRIER</th><th>CALLED RIGHT</th><th></th></tr></thead><tbody></tbody></table><p id="oddsFoot" class="evfoot"></p></div>
+    <div><h3>Is the printed range honest?</h3><table id="evRange"><thead><tr><th>SHARE OF REAL CAPS</th><th>LEAVE-ONE-OUT</th><th>WALK-FORWARD</th></tr></thead><tbody></tbody></table><p class="evfoot">Bootstrap (200 refits): the band and rank range on every row. Category effects ×<span id="catRange"></span>.</p></div>
   </div>
 </section>
 
-<section class="controls" aria-label="Board controls">
-  <div class="tabs" id="tabs" role="tablist" aria-label="Verdict filter">
-    <button type="button" data-tab="all" class="on" role="tab" aria-selected="true">All 202</button>
-    <button type="button" data-tab="farm" role="tab" aria-selected="false">Farm 21</button>
-    <button type="button" data-tab="marginal" role="tab" aria-selected="false">Marginal 36</button>
-    <button type="button" data-tab="skip" role="tab" aria-selected="false">Skip 145</button>
-    <button type="button" data-tab="tiers" role="tab" aria-selected="false">All tiers</button>
-    <button type="button" data-tab="watchlist" role="tab" aria-selected="false">Watchlist</button>
-    <button type="button" data-tab="early" role="tab" aria-selected="false">Early (&lt; $50.0M)</button>
-    <button type="button" data-tab="offlist" role="tab" aria-selected="false">Off-list</button>
-    <label class="dep">Deposit <select id="f-dep" aria-label="Deposit"><option value="plan">plan size</option><option value="2500">$2,500</option><option value="5000">$5,000</option><option value="10000">$10,000</option><option value="30000">$30,000</option></select></label>
-    <label class="slider">Drop share <b id="ds-val">7.0%</b> <input type="range" id="f-share" min="0.5" max="14" step="0.5" value="7" aria-label="Drop share percent"></label>
-    <label class="slider">Horizon <b id="hz-val">5 wk</b> <input type="range" id="f-weeks" min="1" max="26" step="1" value="5" aria-label="Horizon in weeks"></label>
-  </div>
-  <div class="frow">
-    <input id="q" type="search" placeholder="Search name, chain, category" autocomplete="off" aria-label="Search name, chain, category">
-    <select id="f-cat" aria-label="All categories"><option value="">All categories</option></select>
-    <select id="f-chain" aria-label="All chains"><option value="">All chains</option></select>
-    <button type="button" id="f-reset">Reset</button>
-    <button type="button" id="f-csv">CSV</button>
-    <button type="button" id="f-json">JSON</button>
-    <p class="filter-note" id="filter-note" aria-live="polite"></p>
-    <p class="count" id="count" aria-live="polite"></p>
-  </div>
+<div id="boardWrap">
+<div id="toolbar">
+  <div id="tabs" role="tablist"></div>
+  <label class="ctl">Deposit <select id="depositSel"><option value="plan" selected>plan size</option><option value="1000">$1,000</option><option value="2500">$2,500</option><option value="5000">$5,000</option><option value="10000">$10,000</option><option value="30000">$30,000</option></select></label>
+  <label class="ctl">Drop share <b id="shareVal">7.0%</b> <input id="shareSlider" type="range" min="1" max="14" step="0.5" value="7"></label>
+  <label class="ctl">Horizon <b id="weeksVal">5 wk</b> <input id="weeksSlider" type="range" min="1" max="12" step="1" value="5"></label>
+</div>
+<div id="toolbar2">
+  <input id="search" type="search" placeholder="Search name, chain, category" aria-label="Search">
+  <select id="catSel"><option value="">All categories</option></select>
+  <select id="chainSel"><option value="">All chains</option></select>
+  <button id="resetBtn" type="button">Reset</button>
+  <button id="csvBtn" type="button">CSV</button>
+  <button id="jsonBtn" type="button">JSON</button>
+  <span id="filterNote"></span>
+  <span id="countLine" class="count"></span>
+</div>
+<table id="board"><thead><tr>
+  <th class="cbox"><input id="selAll" type="checkbox" aria-label="Select all"></th>
+  <th id="thRank"># · RANGE ⓘ</th><th id="thProto">PROTOCOL</th><th id="thTvl">TVL</th><th id="thChg">7D</th>
+  <th id="thAge">NO-TOKEN AGE</th><th id="thOdds">TOKEN ODDS</th><th id="thIfl">IF IT LAUNCHES</th>
+  <th id="thImp">IMPLIED VALUE · P25–P75</th><th id="thVerd">VERDICT · NET OF FEES</th><th id="thNph">NET / HOUR</th>
+</tr></thead><tbody id="rows"></tbody></table>
+</div>
+
+<section id="detail" hidden></section>
+
+<section class="panel" id="pricing">
+  <h2>How the value is priced</h2>
+  <p class="formula">implied value = TVL × fitted multiple × token odds</p>
+  <div id="pricingBody"></div>
 </section>
 
-<main>
-  <table class="board" id="board">
-    <thead><tr>
-      <th scope="col" class="cb"><span class="cbx" aria-hidden="true"></span></th>
-      <th scope="col" class="num" data-sort="rank"># · Range <span class="q" title="Rank range across 200 bootstrap refits">?</span></th>
-      <th scope="col" data-sort="name">Protocol</th>
-      <th scope="col" class="num" data-sort="tvl">TVL</th>
-      <th scope="col" class="num" data-sort="growth">7d</th>
-      <th scope="col" class="num" data-sort="age">No-token age</th>
-      <th scope="col" class="num" data-sort="odds">Token odds</th>
-      <th scope="col" class="num" data-sort="launches">If it launches</th>
-      <th scope="col" class="num" data-sort="value">Implied value · P25–P75</th>
-      <th scope="col" data-sort="verdict">Verdict · Net of fees</th>
-      <th scope="col" class="num" data-sort="net">Net / hour</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
-  <p class="empty" id="empty" hidden>No protocol matches these filters. Clear the search or pick another category.</p>
-</main>
-
-<section class="panel detail" id="detail" aria-labelledby="detail-h" hidden>
-  <h2 id="detail-h">Protocol detail</h2>
-  <div id="detail-body"></div>
+<section class="panel" id="live">
+  <h2>Already has a token — the market&rsquo;s own values</h2>
+  <p class="evsub">The 128 priced comps the multiple is fitted on. Their market caps are the ground the board is valued against; the board ranks only protocols that record no token.</p>
+  <table id="liveTable"><thead><tr><th>TOKEN</th><th>CATEGORY</th><th>TVL</th><th>MARKET CAP</th><th>CAP ÷ TVL</th><th>CAP ÷ HELD-OUT MODEL</th></tr></thead><tbody></tbody></table>
 </section>
 
-<section class="panel" id="how" aria-labelledby="how-h">
-  <h2 id="how-h">How the value is priced</h2>
-  <p>We look at the <strong id="fit-n">128</strong> protocols in the snapshot that already trade, and for each one divide its market cap by its TVL. The middle value — <strong id="fit-gm">$0.21</strong> per $1 of TVL — is the base price. Big protocols get a smaller price per dollar (the size fit says value grows slower than TVL, slope <span id="fit-slope">0.52</span>), and each category gets a ridge effect: its average log miss against the base price, shrunk toward no effect by 16 pseudo-observations, so a thin category barely moves the price. A fast-growing week, a long wait with no token and running on more chains were all tried the same way — none of them lowered the held-out miss in both tests, so they are not in the price. They do feed the token odds instead. The formula is:</p>
-  <p class="formula">implied value = TVL × base price × size factor × category effect × token odds</p>
-  <p class="fitline" id="fit-line">Fit: 128 trading protocols, log-log slope 0.52, R² 0.19, base price $0.21 per $1 of TVL.</p>
-  <table class="multiples" id="multiples">
-    <caption>Category effects on the base price (ridge, 16 pseudo-observations; ×1.00 is no effect)</caption>
-    <thead><tr><th scope="col">Category</th><th scope="col" class="num">Effect</th><th scope="col" class="num">Protocols</th></tr></thead>
-    <tbody></tbody>
-  </table>
-  <p class="note">A protocol that records no token is priced from its own TVL and category only. No name is ever given a special price. Protocols that already have a token are listed separately below the board — they are the market's own values, not our estimate.</p>
-</section>
-
-<section class="panel live" aria-labelledby="live-h">
-  <h2 id="live-h">Already has a token — the market's own values</h2>
-  <p>These protocols already trade, so the board does not rank them. Their market caps are shown as they are, for comparison with the estimates above.</p>
-  <table class="board slim" id="live-table">
-    <thead><tr><th scope="col">Protocol</th><th scope="col">Category</th><th scope="col" class="num">TVL</th><th scope="col" class="num">Market cap</th></tr></thead>
-    <tbody></tbody>
-  </table>
-</section>
-
-<footer><p>Token Radar · snapshot 2026-11-14 · values are estimates from public TVL and market-cap figures, not investment advice. Farm plans are a starting checklist, not a promise of a token. Token odds are the peers' record — how often protocols of this age record a token — not a forecast.</p></footer>
+<footer id="foot"></footer>
+</div>
 <script src="../data.js"></script>
 <script src="app.js"></script>
-</body>
-</html>
+</body></html>
