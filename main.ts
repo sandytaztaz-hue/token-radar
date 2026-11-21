@@ -97,11 +97,24 @@ writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: { max_files: 400, max_bytes: 4_194_304 } }),
 );
+// The gate caps the dossier at 1.5 MiB, tighter than the library's own
+// 4 MiB: refuse a build that would fail the gate on size alone.
+const dossierBytes = statSync(join(out, 'dossier.json')).size;
+if (dossierBytes > 1_572_864) {
+  process.stderr.write(`token radar: dossier.json is ${dossierBytes} bytes, over the 1.5 MiB gate cap: shrink the screenshots and re-run\n`);
+  process.exit(1);
+}
 
 const top = board.slice(0, 5).map((r) => `#${r.rank} ${r.slug} $${r.implied_value_usd.toLocaleString('en-US')}`).join(', ');
+const st = radar.stats;
+const farmLine = `FARM ${st.farm_count} / MARGINAL ${st.marginal_count} / SKIP ${st.skip_count}`;
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored\n` +
     `token radar: comps fit on ${fit.comps} tokenized protocols, global median mcap/TVL ${fit.globalMedian.toFixed(4)}, log-log slope ${fit.logLogSlope.toFixed(4)}, R2 ${fit.logLogR2.toFixed(3)}\n` +
+    `token radar: kept value terms: ${fit.keptStages.join(', ') || 'flat baseline only'}; LOO miss x${st.loo_miss} vs x${st.flat_loo_miss} flat, walk-forward x${st.wf_miss} vs x${st.flat_wf_miss} flat\n` +
+    `token radar: token odds Brier ${st.brier} vs ${st.base_brier} base rate, ${Math.round(st.odds_called_right * 100)}% called right; printed P25-P75 holds ${(st.inside_p25_p75 * 100).toFixed(0)}% of real caps, P10-P90 holds ${(st.inside_p10_p90 * 100).toFixed(0)}%\n` +
+    `token radar: farm verdicts ${farmLine}; board checksum ${st.board_checksum}\n` +
     `token radar: top 5: ${top}\n` +
+    `token radar: dossier ${dossierBytes} bytes, dashboard ${dashBytes} bytes\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

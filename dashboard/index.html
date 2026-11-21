@@ -10,21 +10,61 @@
 <header class="top">
   <div class="brand"><span class="dot" aria-hidden="true"></span>TOKEN RADAR</div>
   <h1>Which protocols without a token are worth the most?</h1>
-  <p class="lede">Every protocol in the snapshot that has no token yet — <strong id="stat-rows">342</strong> of them — ranked by the value a token would plausibly have. The value is priced from protocols that already have a token, not from a favourite list. Click any row for the full breakdown and a step-by-step farm plan.</p>
-  <dl class="stats">
-    <div><dt>Protocols ranked</dt><dd id="stat-board">342</dd></div>
-    <div><dt>Watchlist covered</dt><dd id="stat-watch">40 / 40</dd></div>
-    <div><dt>Snapshot date</dt><dd id="stat-date">2026-11-14</dd></div>
-    <div><dt>Top implied value</dt><dd id="stat-top">—</dd></div>
+  <p class="lede">Every protocol in the snapshot that records no token yet — <strong id="stat-rows">342</strong> of them — ranked by the value a token would plausibly have, times the odds a token ever comes. The value is priced from protocols that already have a token, not from a favourite list. Click any row for the full breakdown, the farm verdict and a step-by-step farm plan.</p>
+  <dl class="stats" id="stats">
+    <div><dt>Out-of-sample miss, walk-forward</dt><dd id="s-miss">—</dd><dd class="sub" id="s-miss-sub"></dd></div>
+    <div><dt>Is the printed range honest?</dt><dd id="s-range">—</dd><dd class="sub" id="s-range-sub"></dd></div>
+    <div><dt>Token odds vs base rate, Brier</dt><dd id="s-odds">—</dd><dd class="sub" id="s-odds-sub"></dd></div>
+    <div><dt>Terms that survived both tests</dt><dd id="s-terms">—</dd><dd class="sub" id="s-terms-sub"></dd></div>
+    <div><dt>Worth farming, this scenario</dt><dd id="s-farm">—</dd><dd class="sub" id="s-farm-sub"></dd></div>
+    <div><dt>Watchlist ranked</dt><dd id="s-watch">—</dd><dd class="sub" id="s-watch-sub"></dd></div>
   </dl>
+  <p class="formula">Implied value = TVL × fitted multiple (the value if a token launches) × token odds (from how long peers ran before recording one). Each coefficient is fitted on this snapshot and tested held-out.</p>
 </header>
+
+<section class="panel acct" aria-labelledby="acct-h">
+  <h2 id="acct-h">Protocol accounting</h2>
+  <p class="acct-note" id="acct-note"></p>
+  <div class="bar" id="acct-bar" aria-hidden="true"></div>
+  <ul class="legend" id="acct-legend"></ul>
+  <ul class="chips" id="acct-chips"></ul>
+</section>
+
+<section class="panel evidence" aria-labelledby="ev-h">
+  <h2 id="ev-h">Out-of-sample evidence</h2>
+  <p class="note">A term is kept only if it lowers the held-out miss in both tests: leave-one-out, and walk-forward (protocols listed earlier price those listed later). The rest are shown below, not used.</p>
+  <div class="ev-grid">
+    <div>
+      <h3>Value if a token launches — typical miss, 128 traded tokens</h3>
+      <table class="mini" id="ev-value">
+        <thead><tr><th scope="col">Term, added in order</th><th scope="col" class="num">Leave-one-out</th><th scope="col" class="num">Walk-forward</th><th scope="col"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div>
+      <h3>Token odds — Brier score (share called right), 758 protocols</h3>
+      <table class="mini" id="ev-odds">
+        <thead><tr><th scope="col">Term, added in order</th><th scope="col" class="num">5-fold Brier</th><th scope="col" class="num">Called right</th><th scope="col"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div>
+      <h3>Is the printed range honest?</h3>
+      <table class="mini" id="ev-range">
+        <thead><tr><th scope="col">Share of real caps</th><th scope="col" class="num">Leave-one-out</th><th scope="col" class="num">Walk-forward</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="note" id="ev-boot"></p>
+    </div>
+  </div>
+</section>
 
 <section class="controls" aria-label="Board controls">
   <label>Search <input id="q" type="search" placeholder="Protocol or category name" autocomplete="off"></label>
   <label>Category <select id="f-cat"><option value="">All categories</option></select></label>
   <label>Chain <select id="f-chain"><option value="">All chains</option></select></label>
-  <label>Show <select id="f-status"><option value="">All pre-token</option><option value="watchlist">Watchlist only</option></select></label>
-  <label>Sort by <select id="f-sort"><option value="value">Implied value</option><option value="tvl">TVL</option><option value="growth">7-day growth</option><option value="age">Age with no token</option><option value="name">Name A–Z</option></select></label>
+  <label>Show <select id="f-status"><option value="">All pre-token</option><option value="watchlist">Watchlist only</option><option value="farm">FARM verdict only</option></select></label>
+  <label>Sort by <select id="f-sort"><option value="value">Implied value</option><option value="tvl">TVL</option><option value="growth">7-day growth</option><option value="age">Age with no token</option><option value="odds">Token odds</option><option value="net">Net / hour</option><option value="name">Name A–Z</option></select></label>
   <p class="count" id="count" aria-live="polite"></p>
 </section>
 
@@ -33,11 +73,15 @@
     <thead><tr>
       <th scope="col" class="num" data-sort="rank">Rank</th>
       <th scope="col" data-sort="name">Protocol</th>
-      <th scope="col" data-sort="category">Category</th>
       <th scope="col" class="num" data-sort="tvl">TVL</th>
-      <th scope="col" class="num" data-sort="growth">7d growth</th>
+      <th scope="col" class="num" data-sort="growth">7d</th>
+      <th scope="col" class="num" data-sort="age">No-token age</th>
+      <th scope="col" class="num" data-sort="odds">Token odds</th>
+      <th scope="col" class="num" data-sort="launches">If it launches</th>
       <th scope="col" class="num" data-sort="value">Implied value</th>
-      <th scope="col">Token status</th>
+      <th scope="col" class="num">P25–P75</th>
+      <th scope="col" data-sort="verdict">Verdict</th>
+      <th scope="col" class="num" data-sort="net">Net / hour</th>
     </tr></thead>
     <tbody></tbody>
   </table>
@@ -51,15 +95,15 @@
 
 <section class="panel" id="how" aria-labelledby="how-h">
   <h2 id="how-h">How the value is priced</h2>
-  <p>We look at the <strong id="fit-n">128</strong> protocols in the snapshot that already trade, and for each one divide its market cap by its TVL. The middle value inside each category becomes that category's price — Lending pays about 13 cents per dollar of TVL, Dexs about 34 cents, bridges about 56 cents. Big protocols get a smaller price per dollar (the size fit says value grows slower than TVL), a fast-growing week adds a little, a long wait with no token adds a little, and running on more chains adds a little. The formula is:</p>
-  <p class="formula">implied value = TVL × category price × size factor × growth factor × age factor × chain factor</p>
-  <p class="fitline" id="fit-line">Fit: log-log slope 0.52, R² 0.19, global middle price 0.20.</p>
+  <p>We look at the <strong id="fit-n">128</strong> protocols in the snapshot that already trade, and for each one divide its market cap by its TVL. The middle value — <strong id="fit-gm">$0.21</strong> per $1 of TVL — is the base price. Big protocols get a smaller price per dollar (the size fit says value grows slower than TVL, slope <span id="fit-slope">0.52</span>), and each category gets a ridge effect: its average log miss against the base price, shrunk toward no effect by 16 pseudo-observations, so a thin category barely moves the price. A fast-growing week, a long wait with no token and running on more chains were all tried the same way — none of them lowered the held-out miss in both tests, so they are not in the price. They do feed the token odds instead. The formula is:</p>
+  <p class="formula">implied value = TVL × base price × size factor × category effect × token odds</p>
+  <p class="fitline" id="fit-line">Fit: 128 trading protocols, log-log slope 0.52, R² 0.19, base price $0.21 per $1 of TVL.</p>
   <table class="multiples" id="multiples">
-    <caption>Category prices (market cap per $1 of TVL, middle value of the protocols that trade)</caption>
-    <thead><tr><th scope="col">Category</th><th scope="col" class="num">Price</th><th scope="col" class="num">Protocols</th></tr></thead>
+    <caption>Category effects on the base price (ridge, 16 pseudo-observations; ×1.00 is no effect)</caption>
+    <thead><tr><th scope="col">Category</th><th scope="col" class="num">Effect</th><th scope="col" class="num">Protocols</th></tr></thead>
     <tbody></tbody>
   </table>
-  <p class="note">A protocol with no token is priced from its own TVL, growth, age and chains only. No name is ever given a special price. Protocols that already have a token are listed separately below the board — they are the market's own values, not our estimate.</p>
+  <p class="note">A protocol that records no token is priced from its own TVL and category only. No name is ever given a special price. Protocols that already have a token are listed separately below the board — they are the market's own values, not our estimate.</p>
 </section>
 
 <section class="panel live" aria-labelledby="live-h">
@@ -71,7 +115,7 @@
   </table>
 </section>
 
-<footer><p>Token Radar · snapshot 2026-11-14 · values are estimates from public TVL and market-cap figures, not investment advice. Farm plans are a starting checklist, not a promise of a token.</p></footer>
+<footer><p>Token Radar · snapshot 2026-11-14 · values are estimates from public TVL and market-cap figures, not investment advice. Farm plans are a starting checklist, not a promise of a token. Token odds are the peers' record — how often protocols of this age record a token — not a forecast.</p></footer>
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>
