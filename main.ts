@@ -1,10 +1,15 @@
-// Token Radar — entrypoint (revision 2, Node 22, standard library only).
+// Token Radar — entrypoint (revision 5, Node 22, standard library only).
 //
 // Reads the sealed snapshot, fits the comps model on its tokenized
 // protocols, ranks every pre-token protocol by the fitted implied value,
 // writes board.json + data.js, copies dashboard/ and screenshots/ to the
 // output directory, and writes dossier.json with the vendored make.fun
 // library. Deterministic: no clock, no randomness, no network.
+//
+// Revision 5 is appearance-only (kiencx layout): the dashboard must
+// carry the "Launch Radar" title and the FARM-tab filter line, and every
+// screenshot must be exactly 1440x900 so the board shows 13 full rows
+// and the detail shows farm-plan steps 1-9 with no mid-line cut.
 //
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input <snapshot.json>
 
@@ -142,8 +147,12 @@ for (const name of shots) {
   }
   const w = head.readUInt32BE(16);
   const h = head.readUInt32BE(20);
-  if (Math.max(w, h) > 1440 || Math.min(w, h) < 800) {
-    process.stderr.write(`token radar: screenshots/${name} is ${w}x${h}: long side over 1440 or short side under 800: re-take it at 1440x900 and re-run\n`);
+  // Revision 5 framing gate: exactly 1440x900, so the board shot holds
+  // 13 full rows and the detail shot holds farm-plan steps 1-9 with no
+  // mid-line cut. A differently-sized shot is a framing bug, not a
+  // rounding difference: refuse it here instead of shipping it.
+  if (w !== 1440 || h !== 900) {
+    process.stderr.write(`token radar: screenshots/${name} is ${w}x${h}: re-take it at exactly 1440x900\n`);
     process.exit(1);
   }
 }
@@ -153,6 +162,17 @@ const dashBytes = dash.reduce((sum, name) => sum + statSync(join(out, 'dashboard
 if (dashBytes > TEXT_MAX_BYTES) {
   process.stderr.write(`token radar: dashboard source is ${dashBytes} bytes, over the 64 KiB the judge reads: trim it and re-run\n`);
   process.exit(1);
+}
+// Revision 5 appearance gate: the dashboard must carry the kiencx
+// look — the "Launch Radar" title, the tab-pill filter row with the
+// FARM tab, and the gold FARM filter-status line. A build whose
+// dashboard lost those markers is not the r5 revision at all.
+const dashText = dash.map((name) => readFileSync(join(out, 'dashboard', name), 'utf8')).join('\n');
+for (const marker of ['Launch Radar', 'data-tab="farm"', 'Filtered to FARM verdict', 'FARM PLAN — 10 STEPS']) {
+  if (!dashText.includes(marker)) {
+    process.stderr.write(`token radar: dashboard is missing the r5 appearance marker ${JSON.stringify(marker)}: the kiencx-layout revision did not land\n`);
+    process.exit(1);
+  }
 }
 
 // The dossier is written last: the scorer rebuilds it from this /output

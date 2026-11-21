@@ -8,7 +8,10 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="dot" aria-hidden="true"></span>TOKEN RADAR <span class="src">DeFiLlama snapshot 2026-11-14 · model radar-r2, refitted in this browser · default board: DeFi only, 198 of 342 pre-token protocols</span></div>
+  <div class="top-head">
+    <div class="brand"><h1>Launch Radar</h1><p class="sub">pre-token protocols, valued from their own record</p></div>
+    <p class="src">DeFiLlama snapshot <b>2026-11-14</b> · model <b>radar-r2</b>, refitted in this browser</p>
+  </div>
   <dl class="stats" id="stats">
     <div class="s1"><dt>Out-of-sample miss, walk-forward</dt><dd id="s-miss">—</dd><dd class="sub" id="s-miss-sub"></dd></div>
     <div class="s2"><dt>Is the printed range honest?</dt><dd id="s-range">—</dd><dd class="sub" id="s-range-sub"></dd></div>
@@ -17,10 +20,11 @@
     <div class="s5"><dt>Worth farming, this scenario</dt><dd id="s-farm">—</dd><dd class="sub" id="s-farm-sub"></dd></div>
     <div class="s6"><dt>Watchlist ranked</dt><dd id="s-watch">—</dd><dd class="sub" id="s-watch-sub"></dd></div>
   </dl>
+  <p class="oneliner">Implied value = TVL × fitted multiple (the value if a token launches) × token odds (from how long peers ran before recording one). Each coefficient is fitted on this snapshot and tested held-out.</p>
 </header>
 
 <section class="panel acct" aria-labelledby="acct-h">
-  <h2 id="acct-h">Protocol accounting</h2>
+  <h2 id="acct-h">PROTOCOL ACCOUNTING</h2>
   <p class="acct-note" id="acct-note"></p>
   <div class="bar" id="acct-bar" aria-hidden="true"></div>
   <ul class="legend" id="acct-legend"></ul>
@@ -28,7 +32,7 @@
 </section>
 
 <section class="panel evidence" aria-labelledby="ev-h">
-  <h2 id="ev-h">Out-of-sample evidence</h2>
+  <h2 id="ev-h">OUT-OF-SAMPLE EVIDENCE</h2>
   <p class="note">A term is kept only if it lowers the held-out miss in both tests: leave-one-out, and walk-forward (protocols listed earlier price those listed later).</p>
   <div class="ev-grid">
     <div>
@@ -57,28 +61,44 @@
 </section>
 
 <section class="controls" aria-label="Board controls">
-  <label>Board <select id="f-scope"><option value="defi">DeFi only</option><option value="all">All pre-token</option></select></label>
-  <label>Search <input id="q" type="search" placeholder="Protocol or category name" autocomplete="off"></label>
-  <label>Category <select id="f-cat"><option value="">All categories</option></select></label>
-  <label>Chain <select id="f-chain"><option value="">All chains</option></select></label>
-  <label>Show <select id="f-status"><option value="">All pre-token</option><option value="watchlist">Watchlist only</option><option value="farm">FARM verdict only</option></select></label>
-  <label>Sort by <select id="f-sort"><option value="value">Implied value</option><option value="tvl">TVL</option><option value="growth">7-day growth</option><option value="age">Age with no token</option><option value="odds">Token odds</option><option value="net">Net / hour</option><option value="name">Name A–Z</option></select></label>
-  <p class="count" id="count" aria-live="polite"></p>
+  <div class="tabs" id="tabs" role="tablist" aria-label="Verdict filter">
+    <button type="button" data-tab="all" class="on" role="tab" aria-selected="true">All 198</button>
+    <button type="button" data-tab="farm" role="tab" aria-selected="false">Farm 26</button>
+    <button type="button" data-tab="marginal" role="tab" aria-selected="false">Marginal 40</button>
+    <button type="button" data-tab="skip" role="tab" aria-selected="false">Skip 132</button>
+    <button type="button" data-tab="tiers" role="tab" aria-selected="false">All tiers</button>
+    <button type="button" data-tab="watchlist" role="tab" aria-selected="false">Watchlist</button>
+    <button type="button" data-tab="early" role="tab" aria-selected="false">Early (&lt; $50.0M)</button>
+    <button type="button" data-tab="offlist" role="tab" aria-selected="false">Off-list</button>
+    <label class="dep">Deposit <select id="f-dep" aria-label="Deposit"><option value="plan">plan size</option><option value="2500">$2,500</option><option value="5000">$5,000</option><option value="10000">$10,000</option><option value="30000">$30,000</option></select></label>
+    <label class="slider">Drop share <b id="ds-val">7.0%</b> <input type="range" id="f-share" min="0.5" max="14" step="0.5" value="7" aria-label="Drop share percent"></label>
+    <label class="slider">Horizon <b id="hz-val">5 wk</b> <input type="range" id="f-weeks" min="1" max="26" step="1" value="5" aria-label="Horizon in weeks"></label>
+  </div>
+  <div class="frow">
+    <input id="q" type="search" placeholder="Search name, chain, category" autocomplete="off" aria-label="Search name, chain, category">
+    <select id="f-cat" aria-label="All categories"><option value="">All categories</option></select>
+    <select id="f-chain" aria-label="All chains"><option value="">All chains</option></select>
+    <button type="button" id="f-reset">Reset</button>
+    <button type="button" id="f-csv">CSV</button>
+    <button type="button" id="f-json">JSON</button>
+    <p class="filter-note" id="filter-note" aria-live="polite"></p>
+    <p class="count" id="count" aria-live="polite"></p>
+  </div>
 </section>
 
 <main>
   <table class="board" id="board">
     <thead><tr>
-      <th scope="col" class="num" data-sort="rank">Rank</th>
+      <th scope="col" class="cb"><span class="cbx" aria-hidden="true"></span></th>
+      <th scope="col" class="num" data-sort="rank"># · Range <span class="q" title="Rank range across 200 bootstrap refits">?</span></th>
       <th scope="col" data-sort="name">Protocol</th>
       <th scope="col" class="num" data-sort="tvl">TVL</th>
       <th scope="col" class="num" data-sort="growth">7d</th>
       <th scope="col" class="num" data-sort="age">No-token age</th>
       <th scope="col" class="num" data-sort="odds">Token odds</th>
       <th scope="col" class="num" data-sort="launches">If it launches</th>
-      <th scope="col" class="num" data-sort="value">Implied value</th>
-      <th scope="col" class="num">P25–P75</th>
-      <th scope="col" data-sort="verdict">Verdict</th>
+      <th scope="col" class="num" data-sort="value">Implied value · P25–P75</th>
+      <th scope="col" data-sort="verdict">Verdict · Net of fees</th>
       <th scope="col" class="num" data-sort="net">Net / hour</th>
     </tr></thead>
     <tbody></tbody>
