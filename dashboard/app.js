@@ -1,7 +1,7 @@
-/* Token Radar dashboard: 11-column board, stats strip, accounting,
-   out-of-sample evidence, detail view with farm verdict, 10-step farm
-   plan and nearest priced peers. No network: all data comes from
-   ../data.js (window.RADAR). */
+/* Token Radar dashboard: 11-column board, coloured 6-panel rating strip,
+   accounting strip, out-of-sample evidence, dense detail view with farm
+   verdict, 10-step farm plan and nearest priced peers. No network: all
+   data comes from ../data.js (window.RADAR). */
 (function () {
   'use strict';
   var D = window.RADAR;
@@ -49,24 +49,23 @@
 
   var fit = D.fit, st = D.stats, acct = D.accounting;
 
-  /* Header stats strip. */
+  /* Header rating strip: 6 coloured panels, one number each. */
   $('stat-rows').textContent = D.board_size;
   $('s-miss').textContent = '×' + st.loo_miss + ' vs ×' + st.flat_loo_miss + ' flat';
-  $('s-miss-sub').textContent = 'a flat multiple misses by ×' + st.flat_loo_miss + ' leave-one-out, ×' + st.flat_wf_miss + ' walk-forward';
+  $('s-miss-sub').textContent = 'flat misses ×' + st.flat_loo_miss + ' LOO, ×' + st.flat_wf_miss + ' walk-fwd';
   $('s-range').textContent = Math.round(st.inside_p25_p75 * 100) + '% · ' + Math.round(st.inside_p10_p90 * 100) + '%';
-  $('s-range-sub').textContent = 'of later-listed caps fall inside P25–P75 (stated 50%) · P10–P90 (stated 80%)';
+  $('s-range-sub').textContent = 'later caps in P25–P75 (50%) · P10–P90 (80%)';
   $('s-odds').textContent = st.brier + ' vs ' + st.base_brier;
-  $('s-odds-sub').textContent = Math.round(st.odds_called_right * 100) + '% of later peers called right, vs 55% at the base rate';
+  $('s-odds-sub').textContent = Math.round(st.odds_called_right * 100) + '% called right, vs 55% base rate';
   $('s-terms').textContent = st.value_terms_kept + ' of ' + st.value_terms_total + ' · ' + st.odds_terms_kept + ' of ' + st.odds_terms_total;
-  $('s-terms-sub').textContent = 'value terms · odds terms survived both tests; the rest are shown below, not used';
+  $('s-terms-sub').textContent = 'value · odds terms kept; rest not used';
   $('s-farm').textContent = st.farm_count + ' of ' + D.board_size;
-  $('s-farm-sub').textContent = 'net beats a T-bill and $10 an hour; ' + st.marginal_count + ' marginal, ' + st.skip_count + ' skip';
+  $('s-farm-sub').textContent = st.marginal_count + ' marginal, ' + st.skip_count + ' skip';
   $('s-watch').textContent = D.watchlist_size + ' / ' + D.watchlist_size;
-  $('s-watch-sub').textContent = 'plus ' + acct.ranked_other + ' pre-token protocols it leaves out';
+  $('s-watch-sub').textContent = 'plus ' + acct.ranked_other + ' pre-token left out';
 
   /* Protocol accounting. */
   var total = acct.total;
-  function share(n) { return (n / total * 100).toFixed(1); }
   $('acct-note').textContent = 'all ' + total + ' snapshot protocols in exactly one group: ' + D.board_size +
     ' ranked as pre-token, ' + acct.priced_comps + ' already record a token, ' + acct.token_no_cap + ' left out by the house list\u2019s own rules';
   var barParts = [
@@ -123,9 +122,9 @@
     '<tr><td>inside P10–P90, stated 80%</td><td class="num">' + Math.round(st.inside_p10_p90 * 100) + '%</td><td class="num">' + Math.round(st.wf_inside_p10_p90 * 100) + '%</td></tr>';
   var effs = Object.keys(fit.categoryEffects).map(function (c) { return fit.categoryEffects[c]; });
   var effLo = Math.min.apply(null, effs), effHi = Math.max.apply(null, effs);
-  $('ev-boot').textContent = 'Fitted, a bootstrap s.e. (200 refits): the band around each implied value and the rank range across refits are shown on every row. ' +
-    'Category effects run ×' + effLo.toFixed(2) + ' to ×' + effHi.toFixed(2) + '. ' +
-    'Odds: 5-fold Brier ' + st.brier + ' vs ' + st.base_brier + ' base rate.';
+  $('ev-boot').textContent = 'Bootstrap (200 refits): the band and rank range on every row. ' +
+    'Category effects ×' + effLo.toFixed(2) + ' to ×' + effHi.toFixed(2) + '. ' +
+    'Odds Brier ' + st.brier + ' vs ' + st.base_brier + ' base rate.';
 
   /* Model panel: fit line + category effects. */
   $('fit-n').textContent = fit.comps;
@@ -221,9 +220,34 @@
     state.sort = $('f-sort').value; state.dir = state.sort === 'name' ? 1 : -1; render();
   });
 
-  /* Detail view. */
+  /* Detail view — dense two-column layout, condensed farm plan so the
+     whole detail fits one 1440x900 shot. The full step text stays in
+     board.json / data.js; the panel shows each step's action plus its
+     cost and time. */
   var compBySlug = {};
   D.comps.forEach(function (c) { compBySlug[c.slug] = c; });
+  function shortStep(s) {
+    var m = s.match(/^([A-Z]+) — (.*)$/);
+    var label = m ? m[1] : '', rest = m ? m[2] : s;
+    var ci = rest.indexOf('Cost:');
+    var head = (ci >= 0 ? rest.slice(0, ci) : rest).trim();
+    var tail = ci >= 0 ? rest.slice(ci) : '';
+    if (head.length > 52) {
+      head = head.slice(0, 52);
+      var sp = head.lastIndexOf(' ');
+      if (sp > 35) head = head.slice(0, sp);
+      head += '…';
+    }
+    var tm = tail.match(/Cost:\s*(.+?)\.\s*Time:\s*(.+?)\.?$/);
+    var costBit = tm ? ('Cost ' + tm[1] + ' · ' + tm[2]) : tail.replace(/\.$/, '');
+    if (costBit.length > 55) {
+      costBit = costBit.slice(0, 55);
+      var sp2 = costBit.lastIndexOf(' ');
+      if (sp2 > 55) costBit = costBit.slice(0, sp2);
+      costBit += '…';
+    }
+    return '<b>' + esc(label) + '</b> — ' + esc(head) + ' <span class="pcost">' + esc(costBit) + '</span>';
+  }
   function showDetail(slug) {
     var r = rows.find(function (x) { return x.slug === slug; });
     if (!r) return;
@@ -266,10 +290,11 @@
     document.querySelectorAll('#board tbody tr.sel').forEach(function (t) { t.classList.remove('sel'); });
     var tr = tbody.querySelector('tr[data-slug="' + slug + '"]');
     if (tr) tr.classList.add('sel');
+    document.body.classList.add('detail-mode');
     $('detail').hidden = false;
     $('detail-body').innerHTML =
       '<p class="crumb"><a href="#board" id="back-board">← Board</a> / ' + esc(r.name) + '</p>' +
-      '<div class="detail-top">' +
+      '<div class="d-head">' +
       '<div class="detail-head">' +
       '<p class="rankline">#' + r.rank + ' of ' + rows.length + ' by implied value · rank ' + r.rank_lo + '–' + r.rank_hi + ' across 200 bootstrap refits</p>' +
       '<h3>' + esc(r.name) + (r.watchlist ? '<span class="badge">WATCHLIST</span>' : '') + ' ' + verdictBadge(r.verdict) + '</h3>' +
@@ -279,7 +304,7 @@
       '<div><dt>TVL</dt><dd>' + moneyFull(r.tvl_usd) + '</dd></div>' +
       '<div><dt>7-day change</dt><dd>' + (r.change_7d === null ? '—' : (r.change_7d > 0 ? '+' : '') + r.change_7d.toFixed(1) + '%') + '</dd></div>' +
       '<div><dt>Listed since</dt><dd>' + esc(r.listed_at || '—') + '</dd></div>' +
-      '<div><dt>No-token age</dt><dd>' + ageLong(r.age_days) + '</dd></div>' +
+      '<div><dt>No-token age</dt><dd>' + ageText(r.age_days) + '</dd></div>' +
       '</dl></div>' +
       '<div class="implied-box"><p class="implied-label">Implied value · a model estimate</p>' +
       '<p class="implied-big">' + moneyFull(r.implied_value_usd) + '</p>' +
@@ -289,31 +314,31 @@
       '<div><dt>P25–P75</dt><dd>' + money(r.p25_usd) + '–' + money(r.p75_usd) + '</dd></div>' +
       '<div><dt>P10–P90</dt><dd>' + money(r.p10_usd) + '–' + money(r.p90_usd) + '</dd></div>' +
       '</dl>' +
-      '<p class="recompute">✓ Recomputed in this browser: equals board.json. DeFiLlama records no token for it, which is not proof it has none; the odds are its peers\u2019 record, not a forecast.</p>' +
+      '<p class="recompute">✓ Recomputed in this browser: equals board.json. DeFiLlama records no token for it — not proof it has none.</p>' +
       '</div></div>' +
-      '<div class="detail-cols">' +
-      '<div class="detail-col">' +
+      '<div class="d-cols">' +
+      '<div class="d-col">' +
       '<h2>How the ' + moneyFull(r.implied_value_usd) + ' is built</h2>' +
       '<table class="break"><thead><tr><th scope="col">Input</th><th scope="col">Figure</th><th scope="col" class="num">Factor</th><th scope="col">What it means</th></tr></thead><tbody>' +
-      '<tr><td>TVL</td><td>DeFiLlama, ' + esc(D.as_of) + '</td><td class="num">—</td><td>The money already locked in the protocol.</td></tr>' +
-      '<tr><td>Base multiple</td><td>$' + m.baseMultiple.toFixed(4) + ' per $1 TVL</td><td class="num">× ' + m.baseMultiple.toFixed(4) + '</td><td>The middle price across ' + fit.comps + ' traded protocols.</td></tr>' +
-      '<tr><td>Size curve</td><td>TVL vs ' + money(fit.medianCompTvl) + ' pivot</td><td class="num">× ' + m.sizeFactor.toFixed(2) + '</td><td>Bigger protocols earn less per dollar (slope ' + fit.logLogSlope.toFixed(2) + '). Base value: ' + money(base) + '.</td></tr>' +
-      '<tr><td>Category · ' + esc(r.category || 'Unknown') + '</td><td>' + esc(m.multipleSource) + (m.categoryEffectN > 0 ? ', ' + m.categoryEffectN + ' priced tokens' : ', family fallback') + '</td><td class="num">× ' + m.categoryEffect.toFixed(2) + '</td><td>Shrunk by 16 pseudo-observations, so a thin category barely moves the price.</td></tr>' +
-      '<tr class="total-row"><td>= Value if a token launches</td><td>TVL × multiple</td><td class="num">' + money(r.value_if_launches_usd) + '</td><td>Before the token odds are applied; the implied band is ' + money(r.p25_usd) + '–' + money(r.p75_usd) + '.</td></tr>' +
-      '<tr><td>Token odds</td><td>peers of its age, category and growth</td><td class="num">× ' + r.token_odds.toFixed(2) + '</td><td>' + Math.round(r.token_odds * 100) + '% of peers this old record a token; Brier ' + st.brier + ' vs ' + st.base_brier + ' base rate.</td></tr>' +
-      '<tr class="total-row"><td>= Implied value</td><td>value × odds</td><td class="num">' + moneyFull(r.implied_value_usd) + '</td><td>Rank ' + r.rank_lo + '–' + r.rank_hi + ' across 200 bootstrap refits.</td></tr>' +
-      '<tr><td>7-day growth</td><td>' + (r.change_7d === null ? 'no data' : r.change_7d.toFixed(1) + '%') + '</td><td class="num">× 1.00</td><td>Tried, not kept: it did not lower the held-out miss in both tests.</td></tr>' +
-      '<tr><td>Age with no token</td><td>' + ageLong(r.age_days) + '</td><td class="num">× 1.00</td><td>Tried in the price, not kept — it lives in the token odds instead.</td></tr>' +
-      '<tr><td>Chain breadth</td><td>' + m.chainCount + ' chain' + (m.chainCount === 1 ? '' : 's') + '</td><td class="num">× 1.00</td><td>Tried, not kept: it did not lower the held-out miss in both tests.</td></tr>' +
+      '<tr><td>TVL</td><td>DeFiLlama, ' + esc(D.as_of) + '</td><td class="num">—</td><td>Money already locked in the protocol.</td></tr>' +
+      '<tr><td>Base multiple</td><td>$' + m.baseMultiple.toFixed(4) + ' per $1 TVL</td><td class="num">× ' + m.baseMultiple.toFixed(4) + '</td><td>Middle price across ' + fit.comps + ' traded protocols.</td></tr>' +
+      '<tr><td>Size curve</td><td>TVL vs ' + money(fit.medianCompTvl) + ' pivot</td><td class="num">× ' + m.sizeFactor.toFixed(2) + '</td><td>Bigger = less per $ (slope ' + fit.logLogSlope.toFixed(2) + '). Base: ' + money(base) + '.</td></tr>' +
+      '<tr><td>Category</td><td>' + esc(m.multipleSource) + '</td><td class="num">× ' + m.categoryEffect.toFixed(2) + '</td><td>Shrunk ×16 pseudo-obs; thin cats barely move it.</td></tr>' +
+      '<tr class="total-row"><td>= Value if launches</td><td>TVL × multiple</td><td class="num">' + money(r.value_if_launches_usd) + '</td><td>Before token odds; band ' + money(r.p25_usd) + '–' + money(r.p75_usd) + '.</td></tr>' +
+      '<tr><td>Token odds</td><td>peers by age, cat., growth</td><td class="num">× ' + r.token_odds.toFixed(2) + '</td><td>' + Math.round(r.token_odds * 100) + '% of peers this old record a token.</td></tr>' +
+      '<tr class="total-row"><td>= Implied value</td><td>value × odds</td><td class="num">' + moneyFull(r.implied_value_usd) + '</td><td>Rank ' + r.rank_lo + '–' + r.rank_hi + ' over 200 refits.</td></tr>' +
+      '<tr><td>7-day growth</td><td>' + (r.change_7d === null ? 'no data' : r.change_7d.toFixed(1) + '%') + '</td><td class="num">× 1.00</td><td>Tried, not kept: miss not lower in both tests.</td></tr>' +
+      '<tr><td>Age with no token</td><td>' + ageLong(r.age_days) + '</td><td class="num">× 1.00</td><td>Tried in the price, not kept — lives in the odds.</td></tr>' +
+      '<tr><td>Chain breadth</td><td>' + m.chainCount + ' chain' + (m.chainCount === 1 ? '' : 's') + '</td><td class="num">× 1.00</td><td>Tried, not kept: miss not lower in both tests.</td></tr>' +
       '</tbody></table>' +
       '<h2>Nearest priced peers · their tokens trade</h2>' +
-      '<table class="break peers"><thead><tr><th scope="col">Token</th><th scope="col">Category</th><th scope="col" class="num">TVL</th><th scope="col" class="num">Market cap</th><th scope="col" class="num">Cap / TVL</th><th scope="col" class="num">Cap ÷ held-out model</th></tr></thead><tbody>' +
+      '<table class="break peers"><thead><tr><th scope="col">Token</th><th scope="col">Category</th><th scope="col" class="num">TVL</th><th scope="col" class="num">Market cap</th><th scope="col" class="num">Cap / TVL</th><th scope="col" class="num">Cap ÷ model</th></tr></thead><tbody>' +
       peerRows + '</tbody></table>' +
       '</div>' +
-      '<div class="detail-col">' +
+      '<div class="d-col">' +
       '<h2>Farm verdict ' + verdictBadge(r.verdict) + '</h2>' +
       '<p class="verdict-meta">' + moneyFull(r.deposit_usd) + ' deposit · ' + (r.drop_share * 100).toFixed(1) + '% drop share · ' + r.weeks + ' weeks</p>' +
-      '<p>' + verdictLine + '</p>' +
+      '<p class="verdict-line">' + verdictLine + '</p>' +
       '<dl class="kv six">' +
       '<div><dt>At risk</dt><dd>' + moneyFull(r.deposit_usd) + '</dd></div>' +
       '<div><dt>Fees, ' + r.weeks + ' weeks</dt><dd>' + moneyFull(r.fees_usd) + '</dd></div>' +
@@ -333,13 +358,19 @@
       '<tr><td>Fees covered above token odds of</td><td class="num">' + Math.round(oddsCover * 100) + '%</td></tr>' +
       '<tr><td>Exit if TVL prints below (−17% in a week)</td><td class="num">' + moneyFull(r.exit_tvl_usd) + '</td></tr>' +
       '</tbody></table>' +
-      '<h2>Farm plan — 10 steps</h2>' +
+      '</div></div>' +
+      '<h2 class="plan-h">Farm plan — 10 steps</h2>' +
       '<p class="verdict-meta">cost and time at a ' + moneyFull(r.deposit_usd) + ' deposit</p>' +
-      '<ol class="plan">' + r.farm_steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
-      '</div></div>';
+      '<ol class="plan two-col">' + r.farm_steps.map(function (s) { return '<li>' + shortStep(s) + '</li>'; }).join('') + '</ol>' +
+      '<p class="plan-note">Condensed view — each step shows its action, cost and time; the full step text is in board.json / data.js.</p>';
     var back = document.getElementById('back-board');
-    if (back) back.addEventListener('click', function (ev) { ev.preventDefault(); $('detail').hidden = true; document.querySelector('#board').scrollIntoView(); });
-    $('detail').scrollIntoView({ block: 'start' });
+    if (back) back.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      document.body.classList.remove('detail-mode');
+      $('detail').hidden = true;
+      document.querySelector('#board').scrollIntoView();
+    });
+    window.scrollTo(0, 0);
   }
 
   /* Live-token table, kept apart from the ranked board. */

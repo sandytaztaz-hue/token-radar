@@ -82,6 +82,20 @@ for (const name of shots) {
     process.stderr.write(`token radar: screenshots/${name} is ${size} bytes, over the 512 KiB cap: recompress it and re-run\n`);
     process.exit(1);
   }
+  // The gate also caps the long side at 1440 and wants the short side at
+  // least 800: read the PNG IHDR (width/height are big-endian uint32 at
+  // bytes 16/20) and refuse a wrongly-sized shot instead of shipping it.
+  const head = readFileSync(join(out, 'screenshots', name));
+  if (head.length < 24 || head.subarray(1, 4).toString('ascii') !== 'PNG' || head.readUInt32BE(12) !== 0x49484452) {
+    process.stderr.write(`token radar: screenshots/${name} is not a PNG: re-take it and re-run\n`);
+    process.exit(1);
+  }
+  const w = head.readUInt32BE(16);
+  const h = head.readUInt32BE(20);
+  if (Math.max(w, h) > 1440 || Math.min(w, h) < 800) {
+    process.stderr.write(`token radar: screenshots/${name} is ${w}x${h}: long side over 1440 or short side under 800: re-take it at 1440x900 and re-run\n`);
+    process.exit(1);
+  }
 }
 // The judge reads at most 64 KiB of dashboard source: refuse a build
 // whose dashboard would be read only in part.
@@ -108,6 +122,7 @@ if (dossierBytes > 1_572_864) {
 const top = board.slice(0, 5).map((r) => `#${r.rank} ${r.slug} $${r.implied_value_usd.toLocaleString('en-US')}`).join(', ');
 const st = radar.stats;
 const farmLine = `FARM ${st.farm_count} / MARGINAL ${st.marginal_count} / SKIP ${st.skip_count}`;
+const shotLine = shots.map((n) => `${n} ${statSync(join(out, 'screenshots', n)).size} bytes`).join(', ');
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored\n` +
     `token radar: comps fit on ${fit.comps} tokenized protocols, global median mcap/TVL ${fit.globalMedian.toFixed(4)}, log-log slope ${fit.logLogSlope.toFixed(4)}, R2 ${fit.logLogR2.toFixed(3)}\n` +
@@ -115,6 +130,6 @@ process.stdout.write(
     `token radar: token odds Brier ${st.brier} vs ${st.base_brier} base rate, ${Math.round(st.odds_called_right * 100)}% called right; printed P25-P75 holds ${(st.inside_p25_p75 * 100).toFixed(0)}% of real caps, P10-P90 holds ${(st.inside_p10_p90 * 100).toFixed(0)}%\n` +
     `token radar: farm verdicts ${farmLine}; board checksum ${st.board_checksum}\n` +
     `token radar: top 5: ${top}\n` +
-    `token radar: dossier ${dossierBytes} bytes, dashboard ${dashBytes} bytes\n` +
+    `token radar: dossier ${dossierBytes} bytes, dashboard ${dashBytes} bytes; screenshots ${shotLine}\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );
